@@ -37,8 +37,8 @@ namespace DshToolbox.Commands
                 examples: new[] { "dsh-toolbox install.prereq --json", "dsh-toolbox install.prereq --fast --json" });
 
             Registry.Add("install.node",
-                L.T("安装 Node.js（官方 zip 解压到用户目录：免管理员、免商店、免 git，无任何安装器交互）",
-                    "Install Node.js (official zip into the user directory: no admin, no Store, no git, no installer prompts)"),
+                L.T("安装 Node.js（官方 zip 直接解压：免商店、免 git、无安装器交互；默认要求管理员，--user-level 装到当前用户，--machine 全机可用）",
+                    "Install Node.js (official zip extracted directly: no Store, no git, no installer prompts; requires admin by default, --user-level for per-user, --machine for system-wide)"),
                 "install node [--version <v>] [--file <zip>] [--machine] [--user-level] [--force] [--dry-run] [--yes]",
                 RunNode,
                 examples: new[] { "dsh-toolbox install.node --dry-run --json", "dsh-toolbox install.node --yes" });
