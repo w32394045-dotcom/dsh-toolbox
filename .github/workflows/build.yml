@@ -24,7 +24,7 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
-      - name: 自检与验收（36 项）
+      - name: 自检与验收（44 项）
         shell: pwsh
         run: ./verify.ps1
 

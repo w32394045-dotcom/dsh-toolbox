@@ -21,3 +21,7 @@ icon/.render/
 
 # ---- 个人设置（各人环境不同） ----
 settings.json
+
+# CI/本地探测产生的临时 JSON
+manifest.json
+prereq.json

@@ -1,19 +1,19 @@
-﻿# dsh-toolbox —— DSH 工具箱
+# dsh-toolbox —— DSH 工具箱
 
 [English](README.md) | **简体中文**
 
 [![build](https://github.com/w32394045-dotcom/dsh-toolbox/actions/workflows/build.yml/badge.svg)](https://github.com/w32394045-dotcom/dsh-toolbox/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![platform](https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4)
+![platform](https://img.shields.io/badge/platform-Windows%207%2B%20%7C%20x64%20%7C%20ARM64-0078D4)
 
 一个**单文件 Windows exe**，给 DSH agent 当"手和脚"：文件扫描、哈希、进程与服务、系统与网络诊断、
 签名与完整性校验、后台任务与日志管理 —— 并且都能被 agent 以稳定 JSON 契约驱动。
 
-* 产物：`dsh-toolbox.exe`（约 490 KB，**只依赖系统自带的 .NET Framework 4.8**）
-* 无 Python / Node / .NET SDK / 管理员权限依赖；启动零延迟（适合被频繁调用）
+* 产物：`dsh-toolbox.exe`（约 543 KB，**只依赖系统自带的 .NET Framework 4.8**）
+* 无需 Python / Node / .NET SDK，工具本身以普通用户运行（只有安装类操作会要求提权）；启动零延迟（适合被频繁调用）
 * 机器可读优先：`--json` 一个信封、`--jsonl` 流式、严格退出码、永不静默成功
 * 长连接通道：`serve --stdio`（NDJSON 上的 JSON-RPC 2.0），可订阅日志与任务事件
-* 验收：`verify.ps1` **36 项全绿**（信封 / 退出码 / stdout 纯净性 / 结论语义 / 破坏性闸门 / 流式契约 / 通道）
+* 验收：`verify.ps1` **44 项全绿**（信封 / 退出码 / stdout 纯净性 / 结论语义 / 破坏性闸门 / 流式契约 / 通道）
 * **GUI + CLI 同一个 exe**：双击进图形界面，带参数走 CLI
 
 ![dsh-toolbox 界面（英文 · 浅色主题）](docs/screenshots/gui-en-overview.png)
@@ -30,7 +30,7 @@
 
 ## 功能
 
-* **66 条命令 / 20 组** —— 见下方命令表
+* **68 条命令 / 20 组** —— 见下方命令表
 * **两种安装形态**：官方桌面端或 CLI（`@deepseek-ai/dsh`），内置安装器含大小 + SHA-512 + Authenticode 校验、
   静默安装、版本校验、启动
 * **环境体检**（`compat.check`）：13 项针对已知故障场景 —— 验签超时、CPU 指令集缺失、PowerShell 受限、
@@ -49,9 +49,10 @@
 `install.cli` 不假设机器上有什么。它**先探测、缺什么就自动装、再用 npm 把 CLI 装上**，全程 CLI、非交互：
 
 ```powershell
-dsh-toolbox install.prereq --json          # 12 项前置探测 + 可直接执行的安装计划
+dsh-toolbox install.prereq --json          # 12–13 项前置探测（含联网为 13 项，`--fast` 为 12 项） + 可直接执行的安装计划
 dsh-toolbox install.cli --dry-run --json   # 只展示计划，不动任何东西
-dsh-toolbox install.cli --yes              # 探测 → 缺 Node 自动装 → npm 装 dsh → PATH → 验证
+dsh-toolbox install.cli --user-level --yes    # 用户级安装，不需要管理员
+dsh-toolbox elevate.run -- install.cli --yes  # 默认路径：管理员模式执行（会弹 UAC）
 ```
 
 * **不需要微软商店、不需要 winget、不需要 git。** Node 用**官方 zip**装到用户目录 —— 没有 MSI/EXE 安装器，
@@ -123,22 +124,22 @@ $exe = '.\dsh-toolbox.exe'
 | 设置 | `config.get` `config.set` |
 | 通道 | `serve --stdio`（JSON-RPC 2.0） |
 
-以上全部已实现，并通过真实调用验证（36 项验收全绿）。
+以上全部已实现，并通过真实调用验证（44 项验收全绿）。
 
 ## 构建
 
 ```powershell
-powershell -File tools\fetch-roslyn.ps1    # 下载 Roslyn（首次需要，约 40 MB，来自 NuGet）
+powershell -File tools\fetch-roslyn.ps1    # 下载 Roslyn（首次需要，约 21 MB 下载 / 81 MB 解包，来自 NuGet）
 powershell -File build.ps1                 # → dist\dsh-toolbox.exe
-powershell -File verify.ps1                # 对构建产物跑 36 项验收
+powershell -File verify.ps1                # 对构建产物跑 44 项验收
 powershell -File build.ps1 -Out mine.exe   # 并行开发时各用各的输出名
 ```
 
 编译器是 **Roslyn 4.14**（取到 `.tools\` 下），目标运行时是系统自带的 **.NET Framework 4.8** ——
 所以 exe 很小、不需要装任何 SDK，也不会往系统里写东西。
 
-CI（`.github/workflows/build.yml`）每次推送都会在干净的 `windows-latest` 上做同样的事：
-取 Roslyn → 构建 → 跑 36 项验收 → 把 exe 作为 artifact 上传。
+CI（`.github/workflows/build.yml`）每次推送都会在干净的 `windows-latest` **与 `windows-11-arm`** 上做同样的事（每次推送到 `main` 与每个 PR）：
+取 Roslyn → 构建 → 跑 44 项验收 → 把 exe 作为 artifact 上传。
 
 ## 架构一页
 

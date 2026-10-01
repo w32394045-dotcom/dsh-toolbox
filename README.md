@@ -1,20 +1,20 @@
-﻿# dsh-toolbox
+# dsh-toolbox
 
 **English** | [简体中文](README.zh-CN.md)
 
 [![build](https://github.com/w32394045-dotcom/dsh-toolbox/actions/workflows/build.yml/badge.svg)](https://github.com/w32394045-dotcom/dsh-toolbox/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![platform](https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4)
+![platform](https://img.shields.io/badge/platform-Windows%207%2B%20%7C%20x64%20%7C%20ARM64-0078D4)
 
 A **single-file Windows toolbox** that acts as hands and feet for DSH agents: file scanning, hashing,
 processes and services, system and network diagnostics, signature and integrity verification, background
 jobs and log management — all drivable by an agent through a stable JSON contract.
 
-* Output: `dsh-toolbox.exe` (~490 KB, **depends only on the bundled .NET Framework 4.8**)
-* No Python / Node / .NET SDK / admin rights required; zero startup delay (built to be called often)
+* Output: `dsh-toolbox.exe` (~543 KB, **depends only on the bundled .NET Framework 4.8**)
+* No Python / Node / .NET SDK required, and the tool itself runs without admin rights (only installs ask for elevation); zero startup delay (built to be called often)
 * Machine-readable first: one JSON envelope with `--json`, streaming `--jsonl`, strict exit codes, never silently "succeeds"
 * Long-lived channel: `serve --stdio` (JSON-RPC 2.0 over NDJSON) with log and job events
-* Acceptance: `verify.ps1` — **36/36 green** (envelope / exit codes / clean stdout / verdict semantics / destructive gate / streaming contract / channel)
+* Acceptance: `verify.ps1` — **44/44 green** (envelope / exit codes / clean stdout / verdict semantics / destructive gate / streaming contract / channel)
 * **GUI + CLI in one exe**: double-click for the graphical window, pass arguments for the CLI
 
 ![dsh-toolbox GUI (English, light theme)](docs/screenshots/gui-en-overview.png)
@@ -33,7 +33,7 @@ elapsed milliseconds).
 
 ## Features
 
-* **66 commands across 20 groups** — see the table below
+* **68 commands across 20 groups** — see the table below
 * **Two-way distribution**: official desktop app or the CLI (`@deepseek-ai/dsh`), built-in installer with
   size + SHA-512 + Authenticode verification, silent install, version check, launch
 * **Environment check** (`compat.check`): 13 checks for the known failure modes — signature-check timeouts,
@@ -53,9 +53,10 @@ elapsed milliseconds).
 installs the CLI via npm** — all through the CLI, non-interactively:
 
 ```powershell
-dsh-toolbox install.prereq --json          # 12 pre-flight checks + an executable plan
+dsh-toolbox install.prereq --json          # 12–13 pre-flight checks (13 with network probes; 12 with `--fast`) + an executable plan
 dsh-toolbox install.cli --dry-run --json   # show the whole plan without touching anything
-dsh-toolbox install.cli --yes              # check → install Node if missing → npm install dsh → PATH → verify
+dsh-toolbox install.cli --user-level --yes    # per-user install (no admin needed)
+dsh-toolbox elevate.run -- install.cli --yes  # default path: administrator mode (raises UAC)
 ```
 
 * **No Microsoft Store, no winget, no git required.** Node is installed from the **official zip** into the
@@ -132,22 +133,22 @@ Complete command catalog, generated from `manifest --json`: [docs/COMMANDS.md](d
 | Settings | `config.get` `config.set` |
 | Channel | `serve --stdio` (JSON-RPC 2.0) |
 
-Everything listed is implemented and verified by real invocations (36/36 acceptance).
+Everything listed is implemented and verified by real invocations (44/44 acceptance).
 
 ## Build from source
 
 ```powershell
-powershell -File tools\fetch-roslyn.ps1    # download Roslyn (needed once; ~40 MB, from NuGet)
+powershell -File tools\fetch-roslyn.ps1    # download Roslyn (needed once; ~21 MB, ~81 MB extracted, from NuGet)
 powershell -File build.ps1                 # → dist\dsh-toolbox.exe
-powershell -File verify.ps1                # 36 acceptance checks against the built exe
+powershell -File verify.ps1                # 44 acceptance checks against the built exe
 powershell -File build.ps1 -Out mine.exe   # separate output name for parallel work
 ```
 
 The compiler is **Roslyn 4.14** (fetched into `.tools\`), the target runtime is the bundled
 **.NET Framework 4.8** — that is why the exe is small and needs no SDK. Nothing is installed system-wide.
 
-CI (`.github/workflows/build.yml`) does exactly this on a clean `windows-latest` runner for every push:
-fetch Roslyn → build → run the 36 acceptance checks → upload the exe as an artifact.
+CI (`.github/workflows/build.yml`) does exactly this on clean `windows-latest` **and `windows-11-arm`** runners for every push to `main` and every pull request:
+fetch Roslyn → build → run the 44 acceptance checks → upload the exe as an artifact.
 
 ## Architecture
 

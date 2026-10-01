@@ -144,6 +144,16 @@ agent 应改用 `elevate.run -- <命令>`（会弹 UAC，需要人在场）；`-
 **不假设机器上有商店/git/npm**：Node 走官方 zip（无 MSI/EXE，无界面无协议页），
 npm 随 Node 一起提供；`install.prereq` 会明确告诉你不需要它们。
 
+### 4.7 sign.verify 的两种签名形态（别误读 digestMatches）
+
+sign.verify 对**目录签名（catalog）**的文件（例如 Windows 自带的 notepad.exe）会返回
+valid:true 但 integrity.digestMatches:false、computedDigestHex:null —— **这是正常的，不是失败**：
+
+- 内嵌签名（embedded）：签名在 PE 里，签名自身包含文件摘要 → digestMatches 有意义。
+- 目录签名（catalog）：文件本身**没有**内嵌签名，摘要存放在系统目录文件（.cat）中，由 WinVerifyTrust
+  经目录完成校验 → 文件里当然算不出"签名内摘要"，这两个字段不适用。
+- 判断签名是否有效请看 **valid**（等价于 WinVerifyTrust 的结论）；digestMatches 只在
+  signatureKind=embedded 时作为"文件是否被改动"的补充证据。signatureKind 字段会告诉你属于哪种。
 ## 5. 安全约定（agent 必须遵守）
 
 1. **破坏性操作**（删除/移动/覆盖/杀进程/写注册表/改 ACL）默认拒绝，退出码 2；
