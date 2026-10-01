@@ -314,6 +314,7 @@ namespace DshToolbox
             CoreCommands.Register();
             HostCommands.Register();
             InstallCommands.Register();
+            ProvisionCommands.Register();
             ConfigCommands.Register();
             ScanCommands.Register();
             HashCommands.Register();

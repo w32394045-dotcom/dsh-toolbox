@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -28,8 +28,8 @@ namespace DshToolbox.Commands
                 "install desktop [--file <exe>] [--url <url>] [--sha512 <b64>] [--dry-run] [--yes] [--no-start]",
                 RunDesktop, examples: new[] { "dsh-toolbox install.desktop --dry-run --json", "dsh-toolbox install.desktop --yes" });
 
-            Registry.Add("install.cli", L.T("安装官方 CLI（npm 包 @deepseek-ai/dsh，用户级，不需要管理员）", "Install the official CLI (npm package @deepseek-ai/dsh, user-level, no admin needed)"),
-                "install cli [--version <v>] [--file <tgz>] [--registry <url>] [--dry-run] [--yes]",
+            Registry.Add("install.cli", L.T("安装官方 CLI：先探测环境→缺 Node 就自动装（官方 zip）→再用 npm 装 dsh。默认要求管理员（sudo）；--user-level 可装到当前用户", "Install the official CLI: check the environment → auto-install Node if missing (official zip) → install dsh via npm. Requires administrator (sudo) by default; --user-level installs per-user instead"),
+                "install cli [--version <v>] [--file <tgz>] [--registry <url>] [--auto|--no-auto] [--prefix <dir>] [--machine] [--user-level] [--no-path] [--dry-run] [--yes]",
                 RunCli, examples: new[] { "dsh-toolbox install.cli --dry-run --json", "dsh-toolbox install.cli --yes" });
 
             Registry.Add("install.verify", L.T("只做校验：对已有安装包验证 SHA512 与数字签名（不安装）", "Verify only: check SHA512 and the digital signature of an existing package (no install)"),
@@ -199,6 +199,11 @@ namespace DshToolbox.Commands
         // ================================================================ install.cli
         static int RunCli(Ctx ctx)
         {
+            // 默认走"先探测环境 → 自动装依赖（Node/npm，用官方 zip，不需要商店/git/管理员）→ npm 装 CLI → 用户 PATH → 验证"；
+            // --no-auto 保留旧的单步 npm 行为；--file <tgz>（离线包）也走旧路径，因为那是"已有 npm 只装包"。
+            if (!ctx.Flag("no-auto") && string.IsNullOrEmpty(ctx.Get("file")))
+                return ProvisionCommands.InstallCliAuto(ctx);
+
             var cli = HostCommands.CliInfo();
             string npm = FindNpm();
             string version = ctx.Get("version", "");
@@ -226,6 +231,7 @@ namespace DshToolbox.Commands
                     "detail", L.T("将执行：npm ", "Running: npm ") + cmd));
                 return ExitCodes.Ok;
             }
+            ProvisionCommands.RequireElevation(ctx);   // 安装类操作默认要求 sudo（--user-level 可降级）
             ctx.ConfirmDestructive(L.T("通过 npm 安装官方 CLI：", "Installing the official CLI via npm: ") + pkgArg);
 
             var sw = Stopwatch.StartNew();
