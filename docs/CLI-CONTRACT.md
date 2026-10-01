@@ -45,7 +45,7 @@ stdout **必须只有一个 JSON 对象**，且不夹带任何其它文本（人
 {
   "ok": true,
   "cmd": "scan.find",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "elapsedMs": 128,
   "data": { "...": "命令自定义，见 §5" },
   "warnings": ["跳过 3 个无权限目录"],
@@ -58,7 +58,7 @@ stdout **必须只有一个 JSON 对象**，且不夹带任何其它文本（人
 {
   "ok": false,
   "cmd": "scan.find",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "elapsedMs": 12,
   "error": { "code": "E_USAGE", "message": "缺少必填选项 --path", "hint": "例：scan find --path ." }
 }

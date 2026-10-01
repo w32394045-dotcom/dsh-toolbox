@@ -85,7 +85,7 @@ scanner\c\four-copy.bin (20B，同上)      scanner\c\deep\d\e\four-deep.bin (20
 {"type":"item","item":{...four-copy.bin...}}
 {"type":"item","item":{...four.bin...}}
 {"type":"item","item":{...four-deep.bin...}}
-{"type":"meta","cmd":"scan.find","version":"0.1.0","protocol":"1"}
+{"type":"meta","cmd":"scan.find","version":"0.2.0","protocol":"1"}
 {"type":"summary","ok":true,"count":3,"elapsedMs":219,"truncated":false,"warnings":[]}
 ```
 

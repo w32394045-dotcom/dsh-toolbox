@@ -78,7 +78,7 @@ pwsh -File <repo-root>\verify.ps1
 实测 4 帧往返（`initialize → ping → log.tail → shutdown`），全部单行合法 JSON，退出码干净：
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"dsh-toolbox","version":"0.1.0","protocol":"1"},...}}
+{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"dsh-toolbox","version":"0.2.0","protocol":"1"},...}}
 {"jsonrpc":"2.0","id":2,"result":{"pong":true,"ts":"...","pid":4296,"uptimeMs":411}}
 {"jsonrpc":"2.0","id":3,"result":{"file":"...toolbox-20261001.jsonl","lines":[...]}}
 {"jsonrpc":"2.0","id":9,"result":{"ok":true,"bye":"..."}}

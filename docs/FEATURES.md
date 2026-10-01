@@ -1,4 +1,4 @@
-# dsh-toolbox 功能目录与 CLI 规格（FEATURES）
+﻿# dsh-toolbox 功能目录与 CLI 规格（FEATURES）
 
 > 作者：feature-scout（研究/规格角色，不写代码）。版本：v0.2 规划稿（2026-02）。
 > 本文档是**实现规格书**：每一项都给出命令名、选项语义与默认值、`data` 字段结构、退出码、破坏性闸门与依赖的核心 API，
@@ -2244,7 +2244,7 @@ data: `set`: `{"session":"default","key":"project.root","value":..,"version":3,"
 用法: `capabilities [--format json|mcp|openai] [--group <g>] [--command <name>] [--names-only] [--with-schemas] [--with-output-schema] [--stable]`
 data（`--format json`）:
 ```json
-{"version":"0.1.0","protocol":"1","generatedAt":"...","home":"...",
+{"version":"0.2.0","protocol":"1","generatedAt":"...","home":"...",
  "exitCodes":{"0":"成功","1":"运行期错误","2":"用法错误","3":"目标不存在","4":"权限被拒绝","5":"超时","6":"部分成功","130":"被取消"},
  "globalOptions":[{"name":"--json","type":"bool","desc":"..."}],
  "groups":[{"name":"scan","count":26,"summary":"..."}],

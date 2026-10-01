@@ -13,7 +13,7 @@ namespace DshToolbox.Core
     public static class ToolInfo
     {
         public const string Name = "dsh-toolbox";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
         public const string Protocol = "1";
     }
 
