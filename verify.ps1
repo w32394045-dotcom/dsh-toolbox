@@ -91,8 +91,53 @@ $cases = @(
     @{ n = 'log.runs';        a = @('log.runs', '--limit', '3', '--json');                 exp = 0 },
     @{ n = 'job.list';        a = @('job.list', '--json');                                 exp = 0 }
 )
+# ---------------------------------------------------------------- 探测用监听端口（自备）
+# 原先 proc.port / net.tcp 写死 19387——只有在装了 DSH 的机器上才成立，
+# 干净机器（CI）上必然失败。这里自己起一个本地监听进程当探测目标，
+# 任何机器都能确定性地验证这两项；起不来则该项 SKIP 而不是 FAIL。
+$script:ProbePort = 0
+$script:ProbeProc = $null
+$needsListener = @('proc.port', 'net.tcp')
+
+function Stop-ProbeListener {
+    if ($script:ProbeProc -and -not $script:ProbeProc.HasExited) {
+        Stop-Process -Id $script:ProbeProc.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Start-ProbeListener {
+    try {
+        $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $probe.Start()
+        $port = ([System.Net.IPEndPoint]$probe.LocalEndpoint).Port
+        $probe.Stop()
+        $cmd = '$l=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,' + $port + ');$l.Start();Start-Sleep -Seconds 600'
+        $script:ProbeProc = Start-Process -FilePath 'powershell.exe' `
+            -ArgumentList @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', $cmd) `
+            -PassThru -WindowStyle Hidden
+        for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Milliseconds 250
+            try {
+                $c = [System.Net.Sockets.TcpClient]::new()
+                $c.Connect('127.0.0.1', $port)
+                $c.Close()
+                $script:ProbePort = $port
+                Write-Host ("  探测用监听端口: {0}（PID {1}）" -f $port, $script:ProbeProc.Id) -ForegroundColor DarkGray
+                return
+            } catch { }
+        }
+    } catch { }
+    Stop-ProbeListener
+    $script:ProbePort = 0
+}
+
+Start-ProbeListener
 foreach ($c in $cases) {
     if (-not $available.ContainsKey($c.n)) { Record $c.n 'SKIP' '命令未注册'; continue }
+    if ($needsListener -contains $c.n) {
+        if ($script:ProbePort -le 0) { Record $c.n 'SKIP' '本机没有可用监听端口（无法探测）'; continue }
+        for ($k = 0; $k -lt $c.a.Count; $k++) { if ($c.a[$k] -eq '19387') { $c.a[$k] = [string]$script:ProbePort } }
+    }
     $r = Invoke-Tb $c.a
     if ($r.Exit -ne $c.exp) { Record $c.n 'FAIL' ("退出码 {0}，期望 {1}" -f $r.Exit, $c.exp); continue }
     if (-not $r.Obj) { Record $c.n 'FAIL' 'stdout 不是合法 JSON'; continue }
@@ -241,6 +286,8 @@ if ($SkipServe -or -not $available.ContainsKey('serve')) {
     }
     Remove-Item $inF, $outF, $errF -Force -ErrorAction SilentlyContinue
 }
+
+Stop-ProbeListener
 
 # ---------------------------------------------------------------- 汇总
 Write-Host "`n=== 汇总 ===" -ForegroundColor Cyan
