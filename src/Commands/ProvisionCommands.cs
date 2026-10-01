@@ -61,15 +61,49 @@ namespace DshToolbox.Commands
         public static string NpmPrefix { get { return Path.Combine(RuntimeDir, "npm-global"); } }
         static EnvironmentVariableTarget PathScope { get { return _machine ? EnvironmentVariableTarget.Machine : EnvironmentVariableTarget.User; } }
 
-        /// <summary>宿主架构：PROCESSOR_ARCHITEW6432 存在说明是 32 位进程跑在 64 位系统上。</summary>
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct SYSTEM_INFO
+        {
+            public ushort wProcessorArchitecture;
+            public ushort wReserved;
+            public uint dwPageSize;
+            public IntPtr lpMinimumApplicationAddress;
+            public IntPtr lpMaximumApplicationAddress;
+            public IntPtr dwActiveProcessorMask;
+            public uint dwNumberOfProcessors;
+            public uint dwProcessorType;
+            public uint dwAllocationGranularity;
+            public ushort wProcessorLevel;
+            public ushort wProcessorRevision;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        static extern bool GetNativeSystemInfo(out SYSTEM_INFO lpSystemInfo);
+
+        /// <summary>宿主原生架构（x64 / arm64 / x86）——仿真进程里也返回真实架构。</summary>
         public static string HostArch()
         {
             try
             {
-                // 坑：ARCHITECTURE 系列变量取不到时返回的是**空字符串**而不是 null，
-                // 用 ?? 会拿到空串直接掉进兜底分支（ARM64 真机上被 CI 抓到过一次：
-                // PROCESSOR_ARCHITECTURE=ARM64 却报成 x64）。所以这里必须判空。
-                string a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
+                // 真实架构必须问内核：.NET Framework 在 Windows ARM64 上是**以 x64 仿真**运行的，
+                // 那种进程里 PROCESSOR_ARCHITECTURE=AMD64 且 ARCHW6432 为空 —— 光看环境变量会把
+                // ARM64 机器判成 x64（CI 的 windows-11-arm 真机抓到过）。GetNativeSystemInfo 返回宿主
+                // 原生架构，仿真进程里也是对的。
+                try
+                {
+                    SYSTEM_INFO si;
+                    if (GetNativeSystemInfo(out si))
+                    {
+                        if (si.wProcessorArchitecture == 12) return "arm64";
+                        if (si.wProcessorArchitecture == 9) return "x64";
+                        if (si.wProcessorArchitecture == 0) return "x86";
+                    }
+                }
+                catch { }
+
+                // 兜底：机器级环境变量（ARM64 上是 ARM64）→ 进程级变量
+                string a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE", EnvironmentVariableTarget.Machine);
+                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
                 if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE");
                 a = (a ?? "").Trim().ToUpperInvariant();
                 if (a.Contains("ARM64")) return "arm64";
