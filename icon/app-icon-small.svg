@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"
+     role="img" aria-label="dsh-toolbox (small)">
+  <title>dsh-toolbox (16–24 px simplified)</title>
+  <desc>小尺寸专用：去掉提手细节、加粗箱体、缩小圆角，保证 16px 下仍能辨认</desc>
+
+  <defs>
+    <linearGradient id="tileS" x1="26" y1="18" x2="230" y2="238" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5C9BFF"/>
+      <stop offset="0.55" stop-color="#2F6FED"/>
+      <stop offset="1" stop-color="#7A5AF0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 底砖：小尺寸圆角略小，避免糊成一团 -->
+  <rect x="4" y="4" width="248" height="248" rx="46" fill="url(#tileS)"/>
+
+  <!-- 提手：粗描边，16px 下仍可读 -->
+  <path d="M98 84 V70 a16 16 0 0 1 16-16 h28 a16 16 0 0 1 16 16 v14"
+        fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- 箱盖 -->
+  <rect x="44" y="84" width="168" height="42" rx="13" fill="#FFFFFF"/>
+
+  <!-- 锁扣 -->
+  <rect x="112" y="120" width="32" height="28" rx="9" fill="url(#tileS)"/>
+
+  <!-- 箱体 -->
+  <rect x="56" y="140" width="144" height="80" rx="19" fill="#FFFFFF"/>
+</svg>

@@ -1,0 +1,938 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Forms;
+using DshToolbox.Core;
+
+namespace DshToolbox.Gui
+{
+    // ================================================================== 可自动堆叠的页面
+    internal sealed class StackPage : Panel
+    {
+        public readonly List<Control> Cards = new List<Control>();
+        bool _laying;
+        public StackPage()
+        {
+            AutoScroll = true;
+            BackColor = Ui.Bg;
+            Padding = new Padding(26, 20, 26, 26);
+        }
+        public T Add<T>(T c) where T : Control { Cards.Add(c); Controls.Add(c); Relayout(); return c; }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Relayout(); }
+        public void Relayout()
+        {
+            if (_laying) return;
+            _laying = true;
+            try
+            {
+                int avail = ClientSize.Width - Padding.Left - Padding.Right;
+                if (VerticalScroll.Visible) avail -= SystemInformation.VerticalScrollBarWidth;
+                if (avail < 260) avail = 260;
+                int y = Padding.Top;
+                foreach (var c in Cards) { c.Location = new Point(Padding.Left, y); c.Width = avail; y += c.Height + 14; }
+            }
+            finally { _laying = false; }
+        }
+    }
+
+    // ================================================================== 可自定位内容的卡片
+    internal sealed class BodyCard : CardPanel
+    {
+        readonly List<Action<BodyCard>> _layouts = new List<Action<BodyCard>>();
+        public int BodyPad = 18;
+        public int BodyTop { get { return TitleHeight + 8; } }
+        public void Add(Control c, Action<BodyCard> layout)
+        {
+            Controls.Add(c);
+            _layouts.Add(layout);
+            layout(this);
+        }
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            foreach (var l in _layouts) { try { l(this); } catch { } }
+        }
+        public void Reflow() { foreach (var l in _layouts) { try { l(this); } catch { } } }
+        public int InnerW { get { return Math.Max(60, Width - BodyPad * 2); } }
+    }
+
+    // ================================================================== 自绘标题栏
+    internal sealed class TitleBar : Control
+    {
+        public Rectangle BtnRefresh, BtnMin, BtnMax, BtnClose;
+        public int Hover = -1, Down = -1;
+        public event EventHandler RefreshClick, MinClick, MaxClick, CloseClick;
+        public string Subtitle = "";
+
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        public TitleBar()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Height = 46;
+            BackColor = Color.White;
+        }
+
+        void Calc()
+        {
+            int w = 44, h = 30, y = (Height - h) / 2;
+            BtnClose = new Rectangle(Width - w - 8, y, w, h);
+            BtnMax = new Rectangle(BtnClose.X - w - 2, y, w, h);
+            BtnMin = new Rectangle(BtnMax.X - w - 2, y, w, h);
+            BtnRefresh = new Rectangle(BtnMin.X - w - 12, y, w, h);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            Calc();
+            int h = BtnClose.Contains(e.Location) ? 3 : BtnMax.Contains(e.Location) ? 2 : BtnMin.Contains(e.Location) ? 1 : BtnRefresh.Contains(e.Location) ? 0 : -1;
+            if (h != Hover) { Hover = h; Cursor = h >= 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+        protected override void OnMouseLeave(EventArgs e) { Hover = -1; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            Calc();
+            Down = BtnClose.Contains(e.Location) ? 3 : BtnMax.Contains(e.Location) ? 2 : BtnMin.Contains(e.Location) ? 1 : BtnRefresh.Contains(e.Location) ? 0 : -1;
+            Invalidate();
+            if (Down < 0)
+            {
+                // 原生拖动（带贴边/最大化手势）
+                ReleaseCapture();
+                SendMessage(Handle, 0xA1, (IntPtr)0x2, IntPtr.Zero);
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            Calc();
+            int up = BtnClose.Contains(e.Location) ? 3 : BtnMax.Contains(e.Location) ? 2 : BtnMin.Contains(e.Location) ? 1 : BtnRefresh.Contains(e.Location) ? 0 : -1;
+            if (up == Down && up >= 0)
+            {
+                if (up == 3 && CloseClick != null) CloseClick(this, EventArgs.Empty);
+                else if (up == 2 && MaxClick != null) MaxClick(this, EventArgs.Empty);
+                else if (up == 1 && MinClick != null) MinClick(this, EventArgs.Empty);
+                else if (up == 0 && RefreshClick != null) RefreshClick(this, EventArgs.Empty);
+            }
+            Down = -1; Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            if (MaxClick != null) MaxClick(this, EventArgs.Empty);
+            base.OnMouseDoubleClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Calc();
+            g.Clear(Color.White);
+            using (var p = new Pen(Ui.Border)) g.DrawLine(p, 0, Height - 1, Width, Height - 1);
+
+            // 品牌标记
+            var mark = new Rectangle(18, (Height - 26) / 2, 26, 26);
+            using (var lg = new LinearGradientBrush(mark, Ui.Accent, Color.FromArgb(0x7A, 0x5A, 0xF0), 45f))
+            using (var path = Ui.Round(mark, 8)) g.FillPath(lg, path);
+            Ui.DrawText(g, "DSH", Ui.F(9f, FontStyle.Bold), Color.White, mark,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            Ui.DrawText(g, "dsh-toolbox 工具箱", Ui.FBold, Ui.Text, new Rectangle(56, 0, 300, Height),
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (!string.IsNullOrEmpty(Subtitle))
+                Ui.DrawText(g, Subtitle, Ui.FSmall, Ui.Muted, new Rectangle(258, 0, 460, Height),
+                            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding |
+                            TextFormatFlags.EndEllipsis);
+
+            DrawBtn(g, BtnRefresh, 0, Hover == 0, Down == 0);
+            DrawBtn(g, BtnMin, 1, Hover == 1, Down == 1);
+            DrawBtn(g, BtnMax, 2, Hover == 2, Down == 2);
+            DrawBtn(g, BtnClose, 3, Hover == 3, Down == 3);
+        }
+
+        void DrawBtn(Graphics g, Rectangle r, int kind, bool hover, bool down)
+        {
+            if (hover || down)
+            {
+                Color bg = kind == 3 ? Color.FromArgb(0xE8, 0x11, 0x23) : (down ? Color.FromArgb(0xE4, 0xE8, 0xEE) : Color.FromArgb(0xEF, 0xF2, 0xF6));
+                Ui.FillRound(g, r, 7, bg);
+            }
+            Color fg = (kind == 3 && hover) ? Color.White : Ui.SubText;
+            using (var pen = new Pen(fg, 1.4f))
+            {
+                var g2 = g;
+                int cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2;
+                switch (kind)
+                {
+                    case 0: // 刷新
+                        g2.DrawArc(pen, cx - 6, cy - 6, 12, 12, 40, 260);
+                        g2.DrawLine(pen, cx + 3, cy - 7, cx + 6, cy - 3);
+                        g2.DrawLine(pen, cx + 3, cy - 7, cx - 1, cy - 6);
+                        break;
+                    case 1: g2.DrawLine(pen, cx - 5, cy, cx + 5, cy); break;
+                    case 2: g2.DrawRectangle(pen, cx - 5, cy - 5, 10, 10); break;
+                    default:
+                        g2.DrawLine(pen, cx - 5, cy - 5, cx + 5, cy + 5);
+                        g2.DrawLine(pen, cx + 5, cy - 5, cx - 5, cy + 5);
+                        break;
+                }
+            }
+        }
+    }
+
+    // ================================================================== 侧栏
+    internal sealed class SideBar : Panel
+    {
+        public string Version = "";
+        public bool Elevated;
+        public SideBar()
+        {
+            BackColor = Ui.Sidebar;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Ui.Sidebar);
+            using (var p = new Pen(Ui.Border)) g.DrawLine(p, Width - 1, 0, Width - 1, Height);
+
+            Ui.DrawText(g, "导航", Ui.FSmall, Ui.Muted, new Rectangle(22, 10, 120, 18),
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            Ui.DrawText(g, "DSH 宿主与工具箱", Ui.FSmall, Ui.Muted, new Rectangle(0, 6, Width - 22, 18),
+                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // 底部信息
+            int fy = Height - 74;
+            using (var p = new Pen(Ui.Border)) g.DrawLine(p, 16, fy - 10, Width - 16, fy - 10);
+            Ui.DrawText(g, "dsh-toolbox " + Version, Ui.FSmall, Ui.SubText, new Rectangle(18, fy, Width - 36, 18),
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            var pill = new Rectangle(18, fy + 22, Elevated ? 92 : 108, 22);
+            Ui.FillRound(g, pill, 11, Elevated ? Ui.SuccessSoft : Ui.HoverSoft);
+            Ui.DrawText(g, Elevated ? "● 管理员" : "● 普通用户", Ui.FSmall, Elevated ? Ui.Success : Ui.SubText, pill,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+
+    // ================================================================== 主窗体
+    public class MainForm : Form
+    {
+        const int TitleH = 46, SidebarW = 224, Grip = 6;
+
+        readonly string[] _titles = { "概览", "安装与升级", "维护刷新", "环境体检", "任务与日志", "关于" };
+        readonly string[] _glyphs = { "◈", "⬇", "⟳", "✚", "≡", "ⓘ" };
+
+        readonly TitleBar _title = new TitleBar();
+        readonly SideBar _sidebar = new SideBar();
+        readonly Panel _main = new Panel();
+        readonly Panel _pageHost = new Panel();
+        readonly StackPage[] _pages = new StackPage[6];
+        readonly NavItem[] _navs = new NavItem[6];
+        readonly List<Action> _refreshers = new List<Action>();
+        readonly RichTextBox _log = new RichTextBox();
+        readonly FlatProgress _progress = new FlatProgress();
+        readonly Label _status = new Label();
+        System.Windows.Forms.Timer _tick;
+        int _current;
+        bool _busy;
+
+        public MainForm(string[] args)
+        {
+            Text = "dsh-toolbox 工具箱";
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(1140, 760);
+            MinimumSize = new Size(960, 640);
+            BackColor = Ui.Bg;
+            Font = Ui.FBody;
+            KeyPreview = true;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+
+            BuildChrome();
+            BuildPages();
+            int startPage = 0;
+            for (int i = 0; i + 1 < (args == null ? 0 : args.Length); i++)
+                if (args[i] == "--page" || args[i] == "--gui-page") int.TryParse(args[i + 1], out startPage);
+            if (startPage < 0 || startPage > 5) startPage = 0;
+            Select(startPage);
+            Shown += (s, e) => { LayoutChrome(); AfterShown(); };
+            Resize += (s, e) => { ApplyRegion(); LayoutChrome(); };
+            KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.F5) { e.Handled = true; RefreshCurrent(); }
+                if (e.KeyCode == Keys.Escape) { e.Handled = true; Close(); }
+            };
+        }
+
+        // ------------------------------------------------------------ 外观
+        void ApplyRegion()
+        {
+            try
+            {
+                if (WindowState == FormWindowState.Maximized) { Region = null; return; }
+                using (var p = Ui.Round(new Rectangle(0, 0, Width, Height), 12)) Region = new Region(p);
+            }
+            catch { }
+        }
+
+        void BuildChrome()
+        {
+            _title.RefreshClick += (s, e) => RefreshCurrent();
+            _title.MinClick += (s, e) => WindowState = FormWindowState.Minimized;
+            _title.MaxClick += (s, e) => WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+            _title.CloseClick += (s, e) => Close();
+            _title.Subtitle = "v" + ToolInfo.Version + " · GUI + CLI";
+            Controls.Add(_title);
+
+            _sidebar.Version = ToolInfo.Version;
+            Controls.Add(_sidebar);
+
+            _main.BackColor = Ui.Bg;
+            Controls.Add(_main);
+
+            _pageHost.BackColor = Ui.Bg;
+            _main.Controls.Add(_pageHost);
+
+            // 活动日志卡片
+            var logCard = new BodyCard();
+            logCard.SetHeader("活动日志", "所有操作都会在这里留下可回看的记录（与 CLI 的日志同源）");
+            logCard.BackColor = Ui.Card;
+            _main.Controls.Add(logCard);
+            _logCard = logCard;
+
+            _log.BorderStyle = BorderStyle.None;
+            _log.ReadOnly = true;
+            _log.BackColor = Color.White;
+            _log.ForeColor = Ui.Text;
+            _log.Font = Ui.Mono(9f);
+            _log.WordWrap = false;
+            _log.ScrollBars = RichTextBoxScrollBars.Vertical;
+            _log.DetectUrls = false;
+            logCard.Add(_log, c => _log.Bounds = new Rectangle(c.BodyPad, c.BodyTop, c.InnerW, c.Height - c.BodyTop - 34));
+
+            _progress.Value = 0;
+            logCard.Add(_progress, c => _progress.Bounds = new Rectangle(c.BodyPad, c.Height - 30, c.InnerW, 4));
+
+            _status.AutoSize = false;
+            _status.TextAlign = ContentAlignment.MiddleLeft;
+            _status.ForeColor = Ui.Muted;
+            _status.Font = Ui.FSmall;
+            _status.BackColor = Color.Transparent;
+            logCard.Add(_status, c => _status.Bounds = new Rectangle(c.BodyPad, c.Height - 24, c.InnerW, 18));
+            _status.Text = "就绪";
+
+            _tick = new System.Windows.Forms.Timer { Interval = 1000 };
+            _tick.Tick += (s, e) => { if (!_busy) _progress.Value = 0; };
+            _tick.Start();
+        }
+
+        BodyCard _logCard;
+
+        void LayoutChrome()
+        {
+            _title.Bounds = new Rectangle(0, 0, ClientSize.Width, TitleH);
+            _sidebar.Bounds = new Rectangle(0, TitleH, SidebarW, ClientSize.Height - TitleH);
+            _main.Bounds = new Rectangle(SidebarW, TitleH, ClientSize.Width - SidebarW, ClientSize.Height - TitleH);
+            int logH = Math.Max(104, Math.Min(146, ClientSize.Height / 5));
+            _logCard.Bounds = new Rectangle(20, _main.ClientSize.Height - logH - 16, _main.ClientSize.Width - 40, logH);
+            _pageHost.Bounds = new Rectangle(0, 0, _main.ClientSize.Width, _main.ClientSize.Height - logH - 24);
+            _logCard.Reflow();
+        }
+
+        void Select(int index)
+        {
+            _current = index;
+            for (int i = 0; i < 6; i++)
+            {
+                _navs[i].Selected = i == index;
+                _pages[i].Visible = i == index;
+            }
+            _title.Subtitle = "v" + ToolInfo.Version + " · " + _titles[index];
+            _title.Invalidate();
+            if (index < _refreshers.Count && _refreshers[index] != null && !_busy)
+            {
+                try { _refreshers[index](); } catch { }
+            }
+        }
+
+        void RefreshCurrent()
+        {
+            if (_busy) { Log("正在执行上一个操作，请稍候…", Ui.Warn); return; }
+            if (_current < _refreshers.Count && _refreshers[_current] != null) _refreshers[_current]();
+            else Log("已刷新", Ui.Muted);
+        }
+
+        // ------------------------------------------------------------ 日志
+        void Log(string text, Color? color = null)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(() => Log(text, color))); return; }
+            string stamp = DateTime.Now.ToString("HH:mm:ss");
+            _log.SelectionStart = _log.TextLength;
+            _log.SelectionLength = 0;
+            _log.SelectionColor = Ui.Muted;
+            _log.AppendText("[" + stamp + "] ");
+            _log.SelectionColor = color ?? Ui.Text;
+            _log.AppendText(text + Environment.NewLine);
+            _log.SelectionStart = _log.TextLength;
+            _log.ScrollToCaret();
+        }
+
+        void SetStatus(string text, int progress = 0)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(() => SetStatus(text, progress))); return; }
+            _status.Text = text;
+            _progress.Value = progress;
+        }
+
+        // ------------------------------------------------------------ 执行
+        void Run(string title, string cmdLine, Action<ToolResult> done = null)
+        {
+            if (_busy) { Log("上一个操作仍在执行，已忽略：" + title, Ui.Warn); return; }
+            _busy = true;
+            Log("▶ " + title, Ui.Accent);
+            Log("  $ dsh-toolbox " + cmdLine, Ui.Muted);
+            SetStatus(title + " 执行中…", 30);
+            var sw = Stopwatch.StartNew();
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ToolResult res;
+                try { res = Bridge.Call(cmdLine); }
+                catch (Exception ex) { res = new ToolResult { Exit = 1, Raw = ex.Message }; }
+                sw.Stop();
+                BeginInvoke(new Action(delegate
+                {
+                    _busy = false;
+                    SetStatus((res.Ok ? "完成" : "失败") + " · " + title + " · " + sw.ElapsedMilliseconds + " ms", 0);
+                    if (res.Ok)
+                    {
+                        Log("  ✓ " + title + " 完成（" + sw.ElapsedMilliseconds + " ms）", Ui.Success);
+                        PrintData(res.Data);
+                    }
+                    else
+                    {
+                        Log("  ✗ " + title + " 失败（exit=" + res.Exit + "）：" + res.Error, Ui.Danger);
+                    }
+                    if (done != null) done(res);
+                }));
+            });
+        }
+
+        void PrintData(Dictionary<string, object> data)
+        {
+            if (data == null) return;
+            var lines = new List<string>();
+            foreach (var kv in data)
+            {
+                if (kv.Key == "items" || kv.Key == "columns") continue;
+                string v = Bridge.S(data, kv.Key);
+                if (v == null || v.Length == 0) continue;
+                if (v.Length > 160) v = v.Substring(0, 157) + "...";
+                lines.Add("      " + kv.Key + " = " + v);
+                if (lines.Count >= 8) break;
+            }
+            foreach (var l in lines) Log(l, Ui.SubText);
+            if (data.ContainsKey("items"))
+            {
+                try
+                {
+                    var items = Json.ToList((System.Collections.IEnumerable)data["items"]);
+                    int n = 0;
+                    foreach (var it in items)
+                    {
+                        var d = it as Dictionary<string, object>;
+                        if (d == null) continue;
+                        var parts = new List<string>();
+                        foreach (var kv in d) { parts.Add(kv.Key + "=" + Bridge.S(d, kv.Key)); if (parts.Count >= 4) break; }
+                        Log("      · " + string.Join("  ", parts.ToArray()), Ui.Muted);
+                        if (++n >= 6) { if (items.Count > 6) Log("      · …还有 " + (items.Count - 6) + " 条（--json 可见全部）", Ui.Muted); break; }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>需要管理员的操作：先明确提示，用户同意后再弹 UAC。</summary>
+        void AdminRun(string title, string cmdLine, string why, Action<ToolResult> done = null)
+        {
+            if (_busy) return;
+            bool elevated = GuiHost.IsElevated();
+            if (!elevated)
+            {
+                var r = MessageBox.Show(this,
+                    title + "\n\n" + why + "\n\n该操作需要管理员权限，继续将弹出 UAC 授权窗口。",
+                    "需要管理员权限", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                if (r != DialogResult.OK) { Log("已取消（需要管理员权限）：" + title, Ui.Muted); return; }
+                Run(title + "（提权）", "elevate.run -- " + cmdLine, done);
+                return;
+            }
+            Run(title, cmdLine, done);
+        }
+
+        void Btn(BodyCard card, string text, Rectangle r, Action click, FlatButton.Kind kind = FlatButton.Kind.Ghost, bool admin = false)
+        {
+            var b = new FlatButton { Text = admin ? (text + "（需管理员）") : text, Style = kind };
+            b.Click += (s, e) => click();
+            card.Add(b, c => { b.Bounds = r; });
+        }
+
+        // ============================================================ 页面
+        void BuildPages()
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var p = new StackPage();
+                _pages[i] = p;
+                _pageHost.Controls.Add(p);
+                p.Dock = DockStyle.Fill;
+                p.Visible = i == 0;
+
+                var nav = new NavItem { Text = _titles[i], Glyph = _glyphs[i] };
+                int idx = i;
+                nav.Click += (s, e) => Select(idx);
+                _sidebar.Controls.Add(nav);
+                nav.Bounds = new Rectangle(12, 34 + i * 42, SidebarW - 24, 40);
+                _navs[i] = nav;
+            }
+            while (_refreshers.Count < 6) _refreshers.Add(null);
+
+            BuildOverview(_pages[0]);
+            BuildInstall(_pages[1]);
+            BuildMaint(_pages[2]);
+            BuildCompat(_pages[3]);
+            BuildLogs(_pages[4]);
+            BuildAbout(_pages[5]);
+        }
+
+        LabelValue Row(BodyCard card, string label, string value, int y, Color? valueColor = null)
+        {
+            var lv = new LabelValue { Label = label, Value = value, ValueColor = valueColor ?? Ui.Text };
+            card.Add(lv, c => lv.Bounds = new Rectangle(c.BodyPad, y, c.InnerW, 24));
+            return lv;
+        }
+
+        // ---------------- 概览
+        LabelValue _ovVersion, _ovProcess, _ovCli, _ovPort, _ovHome;
+        StatusPill _ovPill;
+        string _compatSummary = "尚未体检";
+
+        void BuildOverview(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("宿主状态", "DeepSeek Harness 桌面端、CLI 与数据目录");
+            c1.Height = 196;
+            page.Add(c1);
+
+            _ovPill = new StatusPill();
+            c1.Add(_ovPill, c => _ovPill.Bounds = new Rectangle(c.InnerW - 96, 16, 96, 22));
+            _ovPill.Set("检测中", StatusPill.Tone.Neutral);
+
+            _ovVersion = Row(c1, "桌面端版本", "—", 54);
+            _ovProcess = Row(c1, "运行进程数", "—", 78);
+            _ovPort = Row(c1, "Web 端口", "—", 102);
+            _ovCli = Row(c1, "CLI", "—", 126);
+            _ovHome = Row(c1, "数据目录", "—", 150);
+
+            var c2 = new BodyCard();
+            c2.SetHeader("快速操作", "针对插件更新、升级残留等常见场景");
+            c2.Height = 150;
+            page.Add(c2);
+            Btn(c2, "重启宿主", new Rectangle(18, 76, 108, 34), () => AdminRun("重启 DSH 桌面端", "maint.restart-host --yes", "将结束全部 DSH 进程并重新启动（当前进行中的会话会中断）。"));
+            Btn(c2, "清理缓存", new Rectangle(134, 76, 108, 34), () => Run("清理 DSH 缓存（预览）", "maint.clean-cache --dry-run"));
+            Btn(c2, "结束残留进程", new Rectangle(250, 76, 128, 34), () => Run("结束残留进程（预览）", "maint.kill-leftovers --dry-run"));
+            Btn(c2, "重新拉取更新", new Rectangle(386, 76, 128, 34), () => AdminRun("重新拉取更新", "maint.pull-update --yes", "将清除已下载的待安装包并重启宿主，让它重新检查更新。"));
+            Btn(c2, "环境体检", new Rectangle(522, 76, 108, 34), () => { Select(3); }, FlatButton.Kind.Primary);
+
+            var c3 = new BodyCard();
+            c3.SetHeader("环境体检摘要", _compatSummary);
+            c3.Height = 122;
+            page.Add(c3);
+            _ovCompatLine = new LabelValue { Label = "结论", Value = "尚未体检" };
+            c3.Add(_ovCompatLine, c => _ovCompatLine.Bounds = new Rectangle(c.BodyPad, c.BodyTop + 2, c.InnerW - 130, 24));
+            _ovCompatLine2 = new LabelValue { Label = "建议", Value = "点右上角按钮开始" };
+            c3.Add(_ovCompatLine2, c => _ovCompatLine2.Bounds = new Rectangle(c.BodyPad, c.BodyTop + 28, c.InnerW, 24));
+            Btn(c3, "开始体检", new Rectangle(0, 0, 108, 30), () => Run("环境体检", "compat.check", r =>
+            {
+                if (!r.Ok && r.Data.ContainsKey("blockCount"))
+                    _compatSummary = "阻断 " + Bridge.S(r.Data, "blockCount") + " · 警告 " + Bridge.S(r.Data, "warnCount");
+                UpdateCompatSummary(r);
+            }), FlatButton.Kind.Primary);
+
+            _refreshers[0] = () => LoadOverview();
+        }
+
+        LabelValue _ovCompatLine, _ovCompatLine2;
+
+        void UpdateCompatSummary(ToolResult r)
+        {
+            int block = (int)Bridge.L(r.Data, "blockCount");
+            int warn = (int)Bridge.L(r.Data, "warnCount");
+            _ovCompatLine.Value = block == 0 ? (warn == 0 ? "未发现明显问题" : warn + " 项警告") : block + " 项阻断性问题";
+            _ovCompatLine.ValueColor = block == 0 ? (warn == 0 ? Ui.Success : Ui.Warn) : Ui.Danger;
+            var tips = new List<string>();
+            foreach (var it in r.Items)
+            {
+                var d = it as Dictionary<string, object>;
+                if (d == null) continue;
+                if (Bridge.B(d, "ok")) continue;
+                tips.Add(Bridge.S(d, "name"));
+                if (tips.Count >= 3) break;
+            }
+            _ovCompatLine2.Value = tips.Count == 0 ? "无需处理" : string.Join("、", tips.ToArray());
+            _ovPill.Set(r.Ok ? "正常" : "需注意", r.Ok ? StatusPill.Tone.Ok : StatusPill.Tone.Warn);
+            _pages[0].Relayout();
+        }
+
+        void LoadOverview()
+        {
+            Run("读取宿主状态", "host.status", r =>
+            {
+                var d = r.Data;
+                var desktop = Bridge.Sub(d, "desktop");
+                var cli = Bridge.Sub(d, "cli");
+                _ovVersion.Value = Bridge.B(desktop, "installed") ? Bridge.S(desktop, "version", "未知") : "未安装";
+                _ovVersion.ValueColor = Bridge.B(desktop, "installed") ? Ui.Text : Ui.Warn;
+                _ovProcess.Value = Bridge.S(desktop, "processCount") + " 个" + (Bridge.B(desktop, "running") ? "（运行中）" : "");
+                _ovPort.Value = Bridge.S(d, "webPort") + (Bridge.B(d, "webListening") ? "  监听中 ✓" : "  未监听");
+                _ovCli.Value = Bridge.B(cli, "found") ? Bridge.S(cli, "path") : "未检测到（安装页可安装）";
+                _ovHome.Value = Bridge.S(d, "dshHome");
+                _ovPill.Set(Bridge.B(desktop, "installed") ? "已安装" : "未安装",
+                            Bridge.B(desktop, "installed") ? StatusPill.Tone.Ok : StatusPill.Tone.Warn);
+                _sidebar.Elevated = Bridge.B(d, "elevated") || GuiHost.IsElevated();
+                _sidebar.Invalidate();
+                _pages[0].Relayout();
+            });
+        }
+
+        // ---------------- 安装与升级
+        string _installKind = "desktop";
+        LabelValue _ivLatest, _ivInstalled, _ivSize, _ivCli;
+        FlatButton _btnDesktop, _btnCli;
+
+        void BuildInstall(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("选择安装形态", "官方桌面端与 CLI 二选一；两者可共存");
+            c1.Height = 196;
+            page.Add(c1);
+
+            _btnDesktop = new FlatButton { Text = "官方桌面端\n图形界面 · 托盘 · 自动更新", Style = FlatButton.Kind.Ghost };
+            _btnDesktop.Font = Ui.FBody;
+            c1.Add(_btnDesktop, c => _btnDesktop.Bounds = new Rectangle(c.BodyPad, c.BodyTop + 4, (c.InnerW - 14) / 2, 74));
+            _btnDesktop.Click += (s, e) => PickKind("desktop");
+
+            _btnCli = new FlatButton { Text = "CLI 命令行版\n供脚本/agent 调用", Style = FlatButton.Kind.Ghost };
+            _btnCli.Font = Ui.FBody;
+            c1.Add(_btnCli, c => _btnCli.Bounds = new Rectangle(c.BodyPad + (c.InnerW - 14) / 2 + 14, c.BodyTop + 4, (c.InnerW - 14) / 2, 74));
+            _btnCli.Click += (s, e) => PickKind("cli");
+
+            Btn(c1, "检查更新", new Rectangle(18, 148, 108, 32), () => Run("检查官方更新源", "install.check", r =>
+            {
+                _ivLatest.Value = Bridge.S(r.Data, "latest", "获取失败");
+                _ivInstalled.Value = Bridge.S(r.Data, "installedVersion", "未安装");
+                _ivSize.Value = Bridge.S(r.Data, "sizeHuman", "-") + "   " + Bridge.S(r.Data, "releaseDate", "");
+                _ivCli.Value = Bridge.B(Bridge.Sub(r.Data, "cli"), "found") ? Bridge.S(Bridge.Sub(r.Data, "cli"), "path") : "未检测到";
+                _pages[1].Relayout();
+            }), FlatButton.Kind.Primary);
+
+            var c2 = new BodyCard();
+            c2.SetHeader("版本与来源", "数据来自官方更新源 nightly.yml");
+            c2.Height = 168;
+            page.Add(c2);
+            _ivLatest = Row(c2, "最新版本", "—", 58);
+            _ivInstalled = Row(c2, "已安装版本", "—", 84);
+            _ivSize = Row(c2, "安装包", "—", 110);
+            _ivCli = Row(c2, "CLI", "—", 136);
+
+            var c3 = new BodyCard();
+            c3.SetHeader("执行安装 / 升级", "会自动完成：结束残留进程 → 校验签名与 SHA512 → 静默安装 → 校验版本 → 启动");
+            c3.Height = 150;
+            page.Add(c3);
+            Btn(c3, "安装 / 升级桌面端", new Rectangle(18, 76, 160, 34), () => AdminRun("安装 / 升级桌面端", "install.desktop --yes", "将下载并安装官方桌面端（会关闭当前运行的 DSH）。"), FlatButton.Kind.Primary);
+            Btn(c3, "安装 CLI", new Rectangle(190, 76, 120, 34), () => AdminRun("安装 CLI", "install.cli --yes", "将安装命令行版本并把入口加入用户 PATH。"));
+            Btn(c3, "从本地安装包安装…", new Rectangle(322, 76, 170, 34), PickLocalInstaller);
+
+            _refreshers[1] = () => Run("检查官方更新源", "install.check", r =>
+            {
+                _ivLatest.Value = Bridge.S(r.Data, "latest", "获取失败");
+                _ivInstalled.Value = Bridge.S(r.Data, "installedVersion", "未安装");
+                _ivSize.Value = Bridge.S(r.Data, "sizeHuman", "-") + "   " + Bridge.S(r.Data, "releaseDate", "");
+                _pages[1].Relayout();
+            });
+            PickKind("desktop");
+        }
+
+        void PickKind(string kind)
+        {
+            _installKind = kind;
+            _btnDesktop.Style = kind == "desktop" ? FlatButton.Kind.Primary : FlatButton.Kind.Ghost;
+            _btnCli.Style = kind == "cli" ? FlatButton.Kind.Primary : FlatButton.Kind.Ghost;
+            Log("安装形态已选择：" + (kind == "desktop" ? "官方桌面端" : "CLI 命令行版"), Ui.Accent);
+        }
+
+        void PickLocalInstaller()
+        {
+            using (var dlg = new OpenFileDialog())
+            {
+                dlg.Title = "选择安装包";
+                dlg.Filter = "安装包 (*.exe)|*.exe|所有文件 (*.*)|*.*";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                string path = dlg.FileName;
+                string cmd = _installKind == "cli" ? "install.cli" : "install.desktop";
+                AdminRun("从本地安装包安装（" + (_installKind == "cli" ? "CLI" : "桌面端") + "）",
+                         cmd + " --yes --file \"" + path + "\"",
+                         "将使用本地文件：" + path);
+            }
+        }
+
+        // ---------------- 维护刷新
+        void BuildMaint(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("快速刷新", "插件更新、升级失败、界面异常时首选这里");
+            c1.Height = 210;
+            page.Add(c1);
+            Btn(c1, "重启宿主（刷新插件）", new Rectangle(18, 76, 176, 34), () => AdminRun("重启 DSH 桌面端", "maint.restart-host --yes", "插件在重启后才会重新加载。"), FlatButton.Kind.Primary);
+            Btn(c1, "重新拉取更新", new Rectangle(206, 76, 134, 34), () => AdminRun("重新拉取更新", "maint.pull-update --yes", "清除已下载内容并重启，让其重新检查。"));
+            Btn(c1, "结束残留进程（预览）", new Rectangle(352, 76, 168, 34), () => Run("结束残留进程（预览）", "maint.kill-leftovers --dry-run"));
+            Btn(c1, "清理缓存（预览）", new Rectangle(18, 120, 140, 34), () => Run("清理缓存（预览）", "maint.clean-cache --dry-run"));
+            Btn(c1, "清理缓存并执行", new Rectangle(170, 120, 140, 34), () => AdminRun("清理 DSH 缓存", "maint.clean-cache --yes", "会关闭应用并删除 Code Cache/GPUCache 等缓存目录。"));
+            Btn(c1, "彻底清理（含会话存储）", new Rectangle(322, 120, 190, 34), () => AdminRun("彻底清理缓存", "maint.clean-cache --yes --all", "除常规缓存外还会清理 Local/Session Storage 等（会退出登录态）。"), FlatButton.Kind.Danger);
+            Btn(c1, "重建工具箱自身", new Rectangle(18, 164, 160, 34), () => Run("重建 dsh-toolbox", "maint.rebuild-self"));
+
+            var c2 = new BodyCard();
+            c2.SetHeader("目录", "排障时常用的位置");
+            c2.Height = 150;
+            page.Add(c2);
+            Btn(c2, "打开数据目录", new Rectangle(18, 76, 130, 34), () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "@deepseek-ai", "dsh-desktop")));
+            Btn(c2, "打开工具箱日志", new Rectangle(160, 76, 140, 34), () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox", "logs")));
+            Btn(c2, "打开更新缓存", new Rectangle(312, 76, 130, 34), () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "@deepseek-aidsh-desktop-updater")));
+            Btn(c2, "打开安装目录", new Rectangle(454, 76, 130, 34), () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "DeepSeek Harness")));
+
+            _refreshers[2] = () => Log("维护页：可直接点击上方动作（需要管理员的会先提示再弹 UAC）", Ui.Muted);
+        }
+
+        void OpenPath(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path)) { Log("目录不存在：" + path, Ui.Warn); return; }
+                Process.Start(new ProcessStartInfo("explorer.exe", "\"" + path + "\"") { UseShellExecute = true });
+                Log("已打开：" + path, Ui.Muted);
+            }
+            catch (Exception ex) { Log("打开失败：" + ex.Message, Ui.Danger); }
+        }
+
+        // ---------------- 环境体检
+        readonly List<StatusPill> _pills = new List<StatusPill>();
+        BodyCard _compatCard;
+
+        void BuildCompat(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("环境体检", "针对验签超时、指令集不支持、脚本受限等已知故障场景");
+            c1.Height = 122;
+            page.Add(c1);
+            Btn(c1, "开始体检", new Rectangle(18, 76, 108, 34), () => Run("环境体检", "compat.check", RenderCompat), FlatButton.Kind.Primary);
+            Btn(c1, "快速体检（跳过联网）", new Rectangle(138, 76, 168, 34), () => Run("环境体检（--fast）", "compat.check --fast", RenderCompat));
+            Btn(c1, "应用可自动修复项", new Rectangle(318, 76, 168, 34), ApplyFixes, FlatButton.Kind.Ghost, true);
+
+            _compatCard = new BodyCard();
+            _compatCard.SetHeader("检测结果", "每一项都给出结论与原因；读不到就说读不到，绝不假装正常");
+            _compatCard.Height = 392;
+            page.Add(_compatCard);
+
+            _refreshers[3] = () => Run("环境体检", "compat.check", RenderCompat);
+        }
+
+        void RenderCompat(ToolResult r)
+        {
+            foreach (var p in _pills) { _compatCard.Controls.Remove(p); p.Dispose(); }
+            _pills.Clear();
+            int y = _compatCard.BodyTop + 6;
+            foreach (var it in r.Items)
+            {
+                var d = it as Dictionary<string, object>;
+                if (d == null) continue;
+                string name = Bridge.S(d, "name");
+                string detail = Bridge.S(d, "detail");
+                bool ok = Bridge.B(d, "ok");
+                bool fixable = Bridge.B(d, "fixable");
+                string fixId = Bridge.S(d, "fixId");
+                string level = Bridge.S(d, "level");
+
+                var lv = new LabelValue
+                {
+                    Label = name,
+                    Value = detail,
+                    ValueColor = ok ? Ui.SubText : (level == "block" ? Ui.Danger : Ui.Warn)
+                };
+                _compatCard.Controls.Add(lv);
+                var cap = _compatCard;
+                lv.Bounds = new Rectangle(cap.BodyPad + 88, y, cap.InnerW - 200, 24);
+
+                var pill = new StatusPill();
+                _compatCard.Controls.Add(pill);
+                pill.Bounds = new Rectangle(cap.BodyPad, y + 1, 78, 22);
+                pill.Set(ok ? "通过" : (level == "block" ? "阻断" : level == "warn" ? "警告" : "提示"),
+                         ok ? StatusPill.Tone.Ok : (level == "block" ? StatusPill.Tone.Bad : StatusPill.Tone.Warn));
+                _pills.Add(pill);
+
+                if (fixable && !string.IsNullOrEmpty(fixId))
+                {
+                    string id = fixId;
+                    var b = new FlatButton { Text = "修复", Style = FlatButton.Kind.Ghost, Font = Ui.FSmall };
+                    b.Click += (s, e) => FixOne(id);
+                    _compatCard.Controls.Add(b);
+                    b.Bounds = new Rectangle(cap.Width - cap.BodyPad - 66, y, 66, 24);
+                }
+                y += 27;
+            }
+            _compatCard.Height = Math.Max(392, y + 18);
+            _compatCard.Invalidate();
+            _pages[3].Relayout();
+
+            int block = (int)Bridge.L(r.Data, "blockCount");
+            int warn = (int)Bridge.L(r.Data, "warnCount");
+            Log("体检结论：" + (block == 0 ? "无阻断项" : block + " 项阻断") + "，警告 " + warn + " 项", block == 0 ? Ui.Success : Ui.Warn);
+        }
+
+        void FixOne(string id)
+        {
+            switch (id)
+            {
+                case "longpaths":
+                    AdminRun("启用超长路径", "compat.fix --id longpaths --yes", "将写入 HKLM 的 LongPathsEnabled=1。"); break;
+                case "defender":
+                    AdminRun("添加 Defender 排除项", "compat.fix --id defender --yes", "把应用目录与更新缓存排除出实时扫描，可显著加快验签与安装。"); break;
+                case "leftovers":
+                    Run("结束残留进程（预览）", "maint.kill-leftovers --dry-run"); break;
+                case "caches":
+                    Run("清理缓存（预览）", "maint.clean-cache --dry-run"); break;
+                default:
+                    Log("该项需手动处理：" + id, Ui.Warn); break;
+            }
+        }
+
+        void ApplyFixes()
+        {
+            var r = MessageBox.Show(this,
+                "将依次应用「可自动修复」的项目：\n\n  · 启用超长路径（需管理员）\n  · 添加 Defender 排除项（需管理员）\n\n继续会弹出 UAC 授权。",
+                "应用修复", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+            if (r != DialogResult.OK) return;
+            AdminRun("启用超长路径", "compat.fix --id longpaths --yes", "写入 LongPathsEnabled=1。", res =>
+            {
+                AdminRun("添加 Defender 排除项", "compat.fix --id defender --yes", "添加两条目录排除项。");
+            });
+        }
+
+        // ---------------- 任务与日志
+        BodyCard _runsCard, _jobsCard;
+        LabelValue _logPreview;
+
+        void BuildLogs(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("运行记录", "每次调用都会落盘到 runs.jsonl，agent 与人都能回看");
+            c1.Height = 150;
+            page.Add(c1);
+            _runsCard = c1;
+            _logPreview = Row(c1, "最近调用", "—", 58);
+            Btn(c1, "刷新", new Rectangle(18, 76, 88, 32), LoadLogs, FlatButton.Kind.Primary);
+            Btn(c1, "查看失败记录", new Rectangle(118, 76, 128, 32), () => Run("失败的调用", "log.runs --exit 1 --limit 10"));
+            Btn(c1, "打开日志目录", new Rectangle(258, 76, 128, 32), () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox", "logs")));
+
+            var c2 = new BodyCard();
+            c2.SetHeader("日志与后台任务", "支持自动刷新（每 5 秒）");
+            c2.Height = 190;
+            page.Add(c2);
+            _jobsCard = c2;
+            var auto = new CheckBox();
+            auto.Text = "自动刷新（5 秒）";
+            auto.ForeColor = Ui.SubText;
+            auto.Font = Ui.FSmall;
+            auto.BackColor = Color.White;
+            auto.FlatStyle = FlatStyle.Flat;
+            auto.Checked = false;
+            auto.CheckedChanged += (s, e) =>
+            {
+                if (auto.Checked) { _tick.Interval = 5000; _tick.Tick += AutoTick; _tick.Start(); Log("已开启自动刷新（5 秒）", Ui.Muted); }
+                else { _tick.Tick -= AutoTick; _tick.Interval = 1000; Log("已关闭自动刷新", Ui.Muted); }
+            };
+            c2.Add(auto, c => auto.Bounds = new Rectangle(c.BodyPad, c.BodyTop + 4, 180, 24));
+            Btn(c2, "日志尾部", new Rectangle(18, 76, 108, 32), () => Run("读取日志尾部", "log.tail --lines 30"));
+            Btn(c2, "后台任务", new Rectangle(138, 76, 108, 32), () => Run("后台任务列表", "job.list --limit 10"));
+            Btn(c2, "失败的 job", new Rectangle(258, 76, 118, 32), () => Run("后台任务列表", "job.list --state failed --limit 10"));
+            Btn(c2, "清屏", new Rectangle(388, 76, 88, 32), () => _log.Clear(), FlatButton.Kind.Subtle);
+
+            _refreshers[4] = LoadLogs;
+        }
+
+        void AutoTick(object s, EventArgs e) { if (!_busy && _current == 4) Run("自动刷新", "log.tail --lines 5"); }
+
+        void LoadLogs()
+        {
+            Run("最近调用记录", "log.runs --limit 6", r =>
+            {
+                _logPreview.Value = r.Items.Count + " 条（显示最近 6 条于日志区）";
+                _pages[4].Relayout();
+            });
+        }
+
+        // ---------------- 关于
+        void BuildAbout(StackPage page)
+        {
+            var c1 = new BodyCard();
+            c1.SetHeader("dsh-toolbox", "DSH 的 Windows 工具箱：GUI + CLI 双模，单文件 exe");
+            c1.Height = 196;
+            page.Add(c1);
+            Row(c1, "版本", ToolInfo.Version + "    协议 " + ToolInfo.Protocol, 58);
+            Row(c1, "可执行文件", Bridge.ExePath, 84);
+            Row(c1, "数据目录", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox"), 110);
+            Row(c1, "运行时", ".NET Framework " + Environment.Version + "（系统自带）", 136);
+            Btn(c1, "打开项目目录", new Rectangle(18, 162, 128, 32), () => OpenPath(@"C:\Users\ptfm\DSH-Toolbox"));
+            Btn(c1, "查看命令清单", new Rectangle(156, 162, 128, 32), () => Run("命令清单", "manifest"));
+
+            var c2 = new BodyCard();
+            c2.SetHeader("给 agent 的接入方式", "CLI 与 stdio 通道并存，契约见 docs/CLI-CONTRACT.md");
+            c2.Height = 176;
+            page.Add(c2);
+            var box = new RichTextBox
+            {
+                BorderStyle = BorderStyle.None,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(0xFA, 0xFB, 0xFC),
+                Font = Ui.Mono(9f),
+                WordWrap = false,
+                ForeColor = Ui.SubText
+            };
+            box.Text = "dsh-toolbox.exe manifest --json          # 命令清单\r\n" +
+                       "dsh-toolbox.exe host.status --json        # 宿主状态\r\n" +
+                       "dsh-toolbox.exe compat.check --json       # 环境体检\r\n" +
+                       "dsh-toolbox.exe sign.verify --path x.exe  # 签名校验（不设 20s 超时）\r\n" +
+                       "dsh-toolbox.exe serve --stdio             # JSON-RPC 通道（agent 长连接）";
+            c2.Add(box, c => box.Bounds = new Rectangle(c.BodyPad, c.BodyTop + 4, c.InnerW, 104));
+
+            _refreshers[5] = () => { };
+        }
+
+        void AfterShown()
+        {
+            LayoutChrome();
+            Log("dsh-toolbox " + ToolInfo.Version + " 已启动（GUI 模式）。", Ui.Success);
+            Log("提示：F5 刷新当前页；关闭窗口不影响 CLI/agent 通道。", Ui.Muted);
+            if (!GuiHost.IsElevated())
+                Log("当前为普通用户：需要管理员的动作会先提示，确认后自动弹出 UAC。", Ui.Muted);
+            LoadOverview();
+            Run("环境体检（快速）", "compat.check --fast", UpdateCompatSummary);
+        }
+    }
+}

@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Roslyn 编译器
+        shell: pwsh
+        run: ./tools/fetch-roslyn.ps1
+
+      - name: 构建 dsh-toolbox.exe
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: 自检与验收（36 项）
+        shell: pwsh
+        run: ./verify.ps1
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-toolbox-exe
+          path: dist/dsh-toolbox.exe
+          if-no-files-found: error
+
+      - name: 命令清单（便于人工核对）
+        shell: pwsh
+        run: |
+          ./dist/dsh-toolbox.exe manifest --json > manifest.json
+          $m = Get-Content manifest.json -Raw | ConvertFrom-Json
+          Write-Host "命令数: $($m.data.count)"
+          Write-Host "分组数: $(($m.data.commands | Group-Object group).Count)"

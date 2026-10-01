@@ -1,0 +1,23 @@
+# ---- 构建产物（二进制不进仓库，走 GitHub Releases） ----
+dist/*.exe
+dist/*.pdb
+dist/*.old.exe
+*.user
+
+# ---- 本地工具链：用 tools\fetch-roslyn.ps1 下载，约 80 MB，不入库 ----
+.tools/
+
+# ---- 运行时/临时数据 ----
+var/
+icon/.render/
+*.log
+
+# ---- 编辑器 ----
+.vs/
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---- 个人设置（各人环境不同） ----
+settings.json
