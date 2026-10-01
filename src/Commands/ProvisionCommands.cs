@@ -66,8 +66,12 @@ namespace DshToolbox.Commands
         {
             try
             {
-                string a = (Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432")
-                            ?? Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? "").ToUpperInvariant();
+                // 坑：ARCHITECTURE 系列变量取不到时返回的是**空字符串**而不是 null，
+                // 用 ?? 会拿到空串直接掉进兜底分支（ARM64 真机上被 CI 抓到过一次：
+                // PROCESSOR_ARCHITECTURE=ARM64 却报成 x64）。所以这里必须判空。
+                string a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
+                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE");
+                a = (a ?? "").Trim().ToUpperInvariant();
                 if (a.Contains("ARM64")) return "arm64";
                 if (a.Contains("AMD64") || a.Contains("IA64")) return "x64";
                 if (a.Contains("X86")) return "x86";
