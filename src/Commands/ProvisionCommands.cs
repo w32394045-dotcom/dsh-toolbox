@@ -80,15 +80,44 @@ namespace DshToolbox.Commands
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         static extern bool GetNativeSystemInfo(out SYSTEM_INFO lpSystemInfo);
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool IsWow64Process2(IntPtr hProcess, out ushort pProcessMachine, out ushort pNativeMachine);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+
         /// <summary>宿主原生架构（x64 / arm64 / x86）——仿真进程里也返回真实架构。</summary>
         public static string HostArch()
         {
             try
             {
-                // 真实架构必须问内核：.NET Framework 在 Windows ARM64 上是**以 x64 仿真**运行的，
-                // 那种进程里 PROCESSOR_ARCHITECTURE=AMD64 且 ARCHW6432 为空 —— 光看环境变量会把
-                // ARM64 机器判成 x64（CI 的 windows-11-arm 真机抓到过）。GetNativeSystemInfo 返回宿主
-                // 原生架构，仿真进程里也是对的。
+                // 真实架构的判定顺序（踩过两次坑，别改）：
+                //  1) IsWow64Process2 —— 唯一在"仿真进程"里也返回**原生**架构的 API（Win10 1709+）。
+                //     .NET Framework 在 Windows ARM64 上是以 x64 仿真运行的：那种进程里
+                //     PROCESSOR_ARCHITECTURE=AMD64、ARCHW6432 为空，GetNativeSystemInfo 也按仿真环境
+                //     回答 AMD64 —— 只有这个 API 会说 native=ARM64。
+                //  2) 机器级 PROCESSOR_ARCHITECTURE（ARM64 机器上就是 ARM64）—— 老系统没有上面那个 API 时兜底。
+                //  3) GetNativeSystemInfo → 4) 进程级环境变量 → 5) Is64BitOperatingSystem。
+                try
+                {
+                    if (IsWow64Process2(GetCurrentProcess(), out ushort proc, out ushort native))
+                    {
+                        if (native == 0xAA64) return "arm64";   // IMAGE_FILE_MACHINE_ARM64
+                        if (native == 0x8664) return "x64";     // IMAGE_FILE_MACHINE_AMD64
+                        if (native == 0x014C) return "x86";     // IMAGE_FILE_MACHINE_I386
+                    }
+                }
+                catch { }
+
+                string a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE", EnvironmentVariableTarget.Machine);
+                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
+                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE");
+                a = (a ?? "").Trim().ToUpperInvariant();
+                if (a.Contains("ARM64")) return "arm64";
+                if (a.Contains("AMD64") || a.Contains("IA64")) return "x64";
+                if (a.Contains("X86")) return "x86";
+
+                // 再退一步：内核接口（老系统无 IsWow64Process2 时用；注意它在仿真进程里按仿真环境回答）
                 try
                 {
                     SYSTEM_INFO si;
@@ -100,15 +129,6 @@ namespace DshToolbox.Commands
                     }
                 }
                 catch { }
-
-                // 兜底：机器级环境变量（ARM64 上是 ARM64）→ 进程级变量
-                string a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE", EnvironmentVariableTarget.Machine);
-                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
-                if (string.IsNullOrWhiteSpace(a)) a = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE");
-                a = (a ?? "").Trim().ToUpperInvariant();
-                if (a.Contains("ARM64")) return "arm64";
-                if (a.Contains("AMD64") || a.Contains("IA64")) return "x64";
-                if (a.Contains("X86")) return "x86";
             }
             catch { }
             return Environment.Is64BitOperatingSystem ? "x64" : "x86";
