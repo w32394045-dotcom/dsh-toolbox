@@ -129,6 +129,7 @@ $inm = Shoot 'gui-install-dark-en' 'en-US' 'dark' 1
 $abe = Shoot 'gui-about-light-en' 'en-US' 'light' 5
 # 日志窗口：停在"环境体检"页，最新的日志行是体检明细（不含用户名/主目录）
 $lw  = Shoot 'gui-log-window'  'zh-CN' 'light' 3 -LogWindow -WaitSec 7
+$tm  = Shoot 'gui-terminal'    'zh-CN' 'light' 6
 
 foreach ($pair in @(
         @{ b = $ov; f = 'gui-overview.png' }, @{ b = $ins; f = 'gui-install.png' },
@@ -137,15 +138,16 @@ foreach ($pair in @(
         @{ b = $abd; f = 'gui-about-en-dark.png' }, @{ b = $ove; f = 'gui-en-overview.png' },
         @{ b = $lw; f = 'gui-log-window.png' },
         @{ b = $cpm; f = 'gui-compat-dark-zh.png' }, @{ b = $inm; f = 'gui-install-dark-en.png' },
-        @{ b = $abe; f = 'gui-about-light-en.png' })) {
+        @{ b = $abe; f = 'gui-about-light-en.png' }, @{ b = $tm; f = 'gui-terminal.png' })) {
     if ($pair.b -ne $null) { $pair.b.Save((Join-Path $outDir $pair.f), [System.Drawing.Imaging.ImageFormat]::Png) }
 }
 
 Save-Compose @($ov, $cpm) 0.62 (Join-Path $outDir 'gui-theme-lang.png')
 Save-Compose @($ov, $ins, $lg, $lw) 0.5 (Join-Path $outDir 'gui-fixed-layout-sheet.png')
+Save-Compose @($ov, $tm) 0.62 (Join-Path $outDir 'gui-web-terminal.png')
 Save-Compose @($ove, $abe) 0.62 (Join-Path $outDir 'gui-en-final.png')
 
-foreach ($b in @($ov, $ins, $mt, $cp, $lg, $ab, $abd, $ove, $cpm, $inm, $abe, $lw)) { if ($b -ne $null) { $b.Dispose() } }
+foreach ($b in @($ov, $ins, $mt, $cp, $lg, $ab, $abd, $ove, $cpm, $inm, $abe, $lw, $tm)) { if ($b -ne $null) { $b.Dispose() } }
 
 Set-Cfg 'auto' 'auto'
 Remove-Item Env:DSH_TOOLBOX_REDACT -ErrorAction SilentlyContinue
