@@ -1065,8 +1065,8 @@ namespace DshToolbox.Gui
         {
             var c1 = Card(page, "dsh-toolbox", L.T("DSH 的 Windows 工具箱：GUI + CLI 双模，单文件 exe","The DSH toolbox for Windows: GUI + CLI in a single exe"));
             c1.Row(Lv(L.T("版本","Version"), ToolInfo.Version + L.T("    协议 ","    protocol ") + ToolInfo.Protocol), 24);
-            c1.Row(Lv(L.T("可执行文件","Executable"), Bridge.ExePath), 24);
-            c1.Row(Lv(L.T("数据目录","Data folder"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox")), 24);
+            c1.Row(Lv(L.T("可执行文件","Executable"), Redact.Text(Bridge.ExePath)), 24);
+            c1.Row(Lv(L.T("数据目录","Data folder"), Redact.Text(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox"))), 24);
             c1.Row(Lv(L.T("运行时","Runtime"), ".NET Framework " + Environment.Version + L.T("（系统自带）"," (bundled with Windows)")), 24);
             c1.Buttons(32,
                 Btn(L.T("打开程序目录","Open app folder"), 128, () => OpenPath(System.IO.Path.GetDirectoryName(Bridge.ExePath))),

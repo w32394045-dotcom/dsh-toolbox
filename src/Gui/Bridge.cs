@@ -154,7 +154,13 @@ namespace DshToolbox.Gui
         }
 
         /// <summary>把任意值渲染成人类可读文本：字符串/布尔/数值直出，嵌套对象与数组转紧凑 JSON。</summary>
+        /// <summary>界面显示出口：脱敏开关打开时替换用户名与主目录路径。</summary>
         public static string Compact(object v, string def = "")
+        {
+            return Redact.Text(CompactRaw(v, def));
+        }
+
+        static string CompactRaw(object v, string def = "")
         {
             if (v == null) return def;
             if (v is string) return (string)v;
