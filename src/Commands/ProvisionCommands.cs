@@ -61,7 +61,22 @@ namespace DshToolbox.Commands
         public static string NpmPrefix { get { return Path.Combine(RuntimeDir, "npm-global"); } }
         static EnvironmentVariableTarget PathScope { get { return _machine ? EnvironmentVariableTarget.Machine : EnvironmentVariableTarget.User; } }
 
-        static string NodeDir(string version) { return Path.Combine(RuntimeDir, "node-v" + version + "-win-x64"); }
+        /// <summary>宿主架构：PROCESSOR_ARCHITEW6432 存在说明是 32 位进程跑在 64 位系统上。</summary>
+        public static string HostArch()
+        {
+            try
+            {
+                string a = (Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432")
+                            ?? Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? "").ToUpperInvariant();
+                if (a.Contains("ARM64")) return "arm64";
+                if (a.Contains("AMD64") || a.Contains("IA64")) return "x64";
+                if (a.Contains("X86")) return "x86";
+            }
+            catch { }
+            return Environment.Is64BitOperatingSystem ? "x64" : "x86";
+        }
+        static string NodeTag { get { return "win-" + HostArch(); } }
+        static string NodeDir(string version) { return Path.Combine(RuntimeDir, "node-v" + version + "-" + NodeTag); }
 
         /// <summary>在 PATH 与几个常见安装位置里找可执行文件。</summary>
         static string FindExe(string exeName, params string[] extraDirs)
@@ -84,11 +99,11 @@ namespace DshToolbox.Commands
             {
                 if (!Directory.Exists(RuntimeDir)) return null;
                 string best = null;
-                foreach (var d in Directory.GetDirectories(RuntimeDir, "node-v*-win-x64"))
+                foreach (var d in Directory.GetDirectories(RuntimeDir, "node-v*-" + NodeTag))
                 {
                     string exe = Path.Combine(d, "node.exe");
                     if (!File.Exists(exe)) continue;
-                    if (preferVersion != null && !d.EndsWith("node-v" + preferVersion + "-win-x64", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (preferVersion != null && !d.EndsWith("node-v" + preferVersion + "-" + NodeTag, StringComparison.OrdinalIgnoreCase)) continue;
                     if (best == null || string.CompareOrdinal(d, best) > 0) best = exe;
                 }
                 return best;
@@ -182,6 +197,31 @@ namespace DshToolbox.Commands
             return v;
         }
 
+        /// <summary>代理信息：环境变量优先，其次 IE/WinINET 设置（npm 只认环境变量，所以要把 IE 代理显式传给它）。</summary>
+        public static Dictionary<string, object> ProxyInfo()
+        {
+            string http = Environment.GetEnvironmentVariable("HTTP_PROXY") ?? Environment.GetEnvironmentVariable("http_proxy");
+            string https = Environment.GetEnvironmentVariable("HTTPS_PROXY") ?? Environment.GetEnvironmentVariable("https_proxy");
+            string no = Environment.GetEnvironmentVariable("NO_PROXY") ?? Environment.GetEnvironmentVariable("no_proxy");
+            bool ieEnabled = false; string ieServer = null, iePac = null;
+            try
+            {
+                const string k = @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+                object en = Microsoft.Win32.Registry.GetValue(k, "ProxyEnable", 0);
+                ieEnabled = en != null && Convert.ToInt32(en) == 1;
+                ieServer = Convert.ToString(Microsoft.Win32.Registry.GetValue(k, "ProxyServer", null));
+                iePac = Convert.ToString(Microsoft.Win32.Registry.GetValue(k, "AutoConfigURL", null));
+            }
+            catch { }
+            string effective = !string.IsNullOrEmpty(https) ? https : (!string.IsNullOrEmpty(http) ? http : (ieEnabled ? ieServer : null));
+            return Json.Obj(
+                "envHttp", http, "envHttps", https, "envNo", no,
+                "ieEnabled", ieEnabled, "ieServer", ieServer, "ieAutoConfig", iePac,
+                "effective", effective,
+                "source", !string.IsNullOrEmpty(https) || !string.IsNullOrEmpty(http) ? "env"
+                          : (ieEnabled ? "ie" : (string.IsNullOrEmpty(iePac) ? "none" : "pac")));
+        }
+
         static string NpmVersionOf(string npm)
         {
             if (string.IsNullOrEmpty(npm) || !File.Exists(npm)) return null;
@@ -242,6 +282,8 @@ namespace DshToolbox.Commands
                 "npmFound", npm != null, "npmPath", npm,
                 "cliVersion", cliVersion,
                 "elevated", HostCommands.IsElevated(),
+                "hostArch", HostArch(), "nodeTag", NodeTag,
+                "proxy", ProxyInfo(),
                 "machine", _machine,
                 "rootDir", RootDir,
                 "pathScope", _machine ? "machine" : "user",
@@ -293,6 +335,15 @@ namespace DshToolbox.Commands
                 npm == null ? L.T("未检测到（随 Node 一起提供，装完 Node 就有）", "not found (ships with Node; installing Node provides it)")
                             : (NpmVersionOf(npm) ?? "?") + "  " + npm,
                 npmOk ? null : L.T("install.node --yes", "install.node --yes"), npmOk ? null : "npm");
+
+            // 3.5) 代理（企业网络下最常见的坑）
+            var px = ProxyInfo();
+            string pxSource = Convert.ToString(px.ContainsKey("source") ? px["source"] : "none");
+            string pxEff = Convert.ToString(px.ContainsKey("effective") ? px["effective"] : null);
+            add("proxy", L.T("网络代理", "Network proxy"), true, "info",
+                pxSource == "none" ? L.T("未检测到代理（直连）", "no proxy detected (direct)")
+                                   : pxSource + ": " + pxEff + (pxSource == "ie" ? L.T("（IE/系统设置；npm 不读它，安装时会显式传入）", " (IE/system setting; npm ignores it, so it is passed explicitly on install)") : ""),
+                null, null);
 
             // 4) git —— 明确"不需要"
             string git = FindExe("git.exe");
@@ -362,6 +413,11 @@ namespace DshToolbox.Commands
         static int RunNode(Ctx ctx)
         {
             _machine = ctx.Flag("machine");
+            if (HostArch() == "x86" && string.IsNullOrEmpty(ctx.Get("file")))
+                throw new ToolException("E_ARCH_UNSUPPORTED",
+                    L.T("32 位 Windows 上官方已不再提供新版 Node 二进制", "Official Node binaries are no longer published for 32-bit Windows"),
+                    L.T("请用 --file <zip> 指定 32 位 Node 包（如 LTS 18 的 win-x86），或改装 64 位系统", "Pass --file <zip> with a 32-bit Node build (e.g. an LTS 18 win-x86 zip), or use a 64-bit OS"), ExitCodes.Usage);
+
             string want = ctx.Get("version", "");
             string file = ctx.Get("file");
             bool force = ctx.Flag("force");
@@ -402,7 +458,8 @@ namespace DshToolbox.Commands
                         L.T("用 --version <v> 指定版本，或用 --file <zip> 指定离线安装包", "Pass --version <v>, or --file <zip> for an offline package"), ExitCodes.NotFound);
             }
 
-            string zipUrl = NodeDistBase + "/v" + version + "/node-v" + version + "-win-x64.zip";
+            string nodeFile = "node-v" + version + "-" + NodeTag + ".zip";
+            string zipUrl = NodeDistBase + "/v" + version + "/" + nodeFile;
             string sumUrl = NodeDistBase + "/v" + version + "/SHASUMS256.txt";
             string dest = NodeDir(version);
 
@@ -412,7 +469,7 @@ namespace DshToolbox.Commands
                 "approach", L.T("官方 zip 直接解压（无 MSI/EXE 安装器 → 无界面、无协议页、无需管理员）",
                                 "official zip extracted directly (no MSI/EXE installer → no UI, no licence pages, no admin)"),
                 "steps", new[] {
-                    L.T("下载 node-v" + version + "-win-x64.zip", "Download node-v" + version + "-win-x64.zip"),
+                    L.T("下载 " + nodeFile, "Download " + nodeFile),
                     L.T("用官方 SHASUMS256.txt 校验 SHA-256", "Verify SHA-256 against the official SHASUMS256.txt"),
                     L.T("解压到 " + dest, "Extract into " + dest),
                     L.T("运行 node --version / npm --version 验证", "Verify with node --version / npm --version") });
@@ -430,7 +487,7 @@ namespace DshToolbox.Commands
             string zip = file;
             if (string.IsNullOrEmpty(zip))
             {
-                zip = Path.Combine(Path.GetTempPath(), "node-v" + version + "-win-x64.zip");
+                zip = Path.Combine(Path.GetTempPath(), nodeFile);
                 ctx.Out.Line(L.T("下载 ", "Downloading ") + zipUrl);
                 Download(zipUrl, zip, ctx, "node");
             }
@@ -443,7 +500,7 @@ namespace DshToolbox.Commands
                 try
                 {
                     string sums = HttpGet(sumUrl, 20000);
-                    var mm = Regex.Match(sums ?? "", @"(?m)^([0-9a-fA-F]{64})\s+\*?node-v" + Regex.Escape(version) + @"-win-x64\.zip\s*$");
+                    var mm = Regex.Match(sums ?? "", @"(?m)^([0-9a-fA-F]{64})\s+\*?" + Regex.Escape(nodeFile) + @"\s*$");
                     if (mm.Success) expected = mm.Groups[1].Value.ToLowerInvariant();
                 }
                 catch { }
@@ -567,6 +624,14 @@ namespace DshToolbox.Commands
             Directory.CreateDirectory(prefix);
             string npmArgs = "install -g \"" + pkgArg + "\" --prefix \"" + prefix + "\" --no-fund --no-audit --loglevel=error";
             if (!string.IsNullOrEmpty(registry)) npmArgs += " --registry \"" + registry + "\"";
+            var pxCli = ProxyInfo();
+            string pxSrc = Convert.ToString(pxCli.ContainsKey("source") ? pxCli["source"] : "none");
+            string pxVal = Convert.ToString(pxCli.ContainsKey("effective") ? pxCli["effective"] : null);
+            if (pxSrc == "ie" && !string.IsNullOrEmpty(pxVal))
+            {
+                npmArgs += " --proxy \"" + pxVal + "\" --https-proxy \"" + pxVal + "\"";
+                ctx.Out.Line(L.T("检测到 IE/系统代理，已显式传给 npm：", "IE/system proxy detected; passing it to npm explicitly: ") + pxVal);
+            }
             ctx.Out.Line("npm " + npmArgs);
             ctx.Out.EmitItem(Json.Obj("phase", "npm", "percent", 40, "detail", L.T("npm 全局安装中…", "npm global install…")));
 

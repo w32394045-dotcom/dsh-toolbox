@@ -266,7 +266,7 @@ namespace DshToolbox.Commands
 
             var os = Environment.OSVersion;
             bool win10 = os.Version.Major >= 10;
-            add("os", Core.L.T("操作系统", "Operating system"), "block", win10, os.VersionString + (Environment.Is64BitOperatingSystem ? " x64" : " x86"), false, false, null);
+            add("os", Core.L.T("操作系统", "Operating system"), "block", win10, os.VersionString + (Environment.Is64BitOperatingSystem ? " x64" : " x86") + Core.L.T("（本工具基线：Windows 7 SP1 + .NET Framework 4.8）", " (tool baseline: Windows 7 SP1 + .NET Framework 4.8)"), false, false, null);
 
             add("arch", Core.L.T("64 位架构", "64-bit architecture"), "warn", Environment.Is64BitOperatingSystem,
                 Environment.Is64BitOperatingSystem ? "x64" : Core.L.T("32 位系统无法运行官方桌面端", "A 32-bit system cannot run the official desktop app"), false, false, null);
