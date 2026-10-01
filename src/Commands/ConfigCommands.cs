@@ -53,7 +53,7 @@ namespace DshToolbox.Commands
                 "settingsFile", Settings.FilePath,
                 "home", Paths.Home,
                 "languages", L.Languages,
-                "themes", new[] { "auto", "light", "dark" },
+                "themes", new[] { "auto", "light", "dark", "contrast" },
                 "items", items, "count", items.Count,
                 "columns", new[] { "name", "value" }));
             return ExitCodes.Ok;
@@ -91,8 +91,9 @@ namespace DshToolbox.Commands
             {
                 string norm = theme.Trim().ToLowerInvariant();
                 if (norm == "auto") { Settings.Theme = "auto"; changed.Add("theme=auto"); }
+                else if (norm == "contrast" || norm == "high-contrast") { Settings.Theme = "contrast"; changed.Add("theme=contrast"); }
                 else if (norm == "light" || norm == "dark") { Settings.Theme = norm; changed.Add("theme=" + norm); }
-                else throw ToolException.Usage(L.T("不支持的主题：" + theme, "Unsupported theme: " + theme), "auto | light | dark");
+                else throw ToolException.Usage(L.T("不支持的主题：" + theme, "Unsupported theme: " + theme), "auto | light | dark | contrast");
             }
 
             if (changed.Count == 0)

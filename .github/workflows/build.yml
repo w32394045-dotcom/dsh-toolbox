@@ -8,7 +8,11 @@ on:
 
 jobs:
   build-and-verify:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]   # ARM64 runner：真机验证架构判定与 anycpu 构建
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +34,20 @@ jobs:
           name: dsh-toolbox-exe
           path: dist/dsh-toolbox.exe
           if-no-files-found: error
+
+      - name: 架构与适配信息（真机核对 hostArch/nodeTag/代理探测）
+        shell: pwsh
+        run: |
+          $exe = './dist/dsh-toolbox.exe'
+          $j = (& $exe install.prereq --fast --json --quiet | Out-String).Trim() | ConvertFrom-Json
+          Write-Host "runner      = ${{ matrix.os }}"
+          Write-Host "OS          = $([System.Environment]::OSVersion.VersionString)  x64=$([System.Environment]::Is64BitOperatingSystem)"
+          Write-Host "PROCESSOR   = $env:PROCESSOR_ARCHITECTURE / ARCHW6432=$env:PROCESSOR_ARCHITEW6432"
+          Write-Host "hostArch    = $($j.data.hostArch)   nodeTag=$($j.data.nodeTag)"
+          Write-Host "proxy.source= $($j.data.proxy.source)"
+          Write-Host "theme       = $((& $exe config.get --json --quiet | Out-String).Trim() | ConvertFrom-Json | ForEach-Object { $_.data.effectiveTheme })"
+          $e = (& $exe compat.check --fast --json --quiet | Out-String).Trim() | ConvertFrom-Json
+          $e.data.items | Where-Object { $_.id -in @('os','arch','dotnet') } | ForEach-Object { Write-Host "  [$($_.ok)] $($_.name): $($_.detail)" }
 
       - name: 命令清单（便于人工核对）
         shell: pwsh

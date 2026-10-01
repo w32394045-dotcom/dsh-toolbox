@@ -46,6 +46,39 @@ namespace DshToolbox.Gui
             HoverSoft = Color.FromArgb(0x28, 0x2C, 0x33), CodeBg = Color.FromArgb(0x1A, 0x1D, 0x22)
         };
 
+        /// <summary>
+        /// 高对比度：不自己发明配色，而是直接取系统高对比度方案的颜色
+        /// （Window/WindowText/Highlight/HotTrack/GrayText），因此兼容用户选的任意 HC 主题。
+        /// 语义色不再靠色相区分——界面里本来就带 ✓/✗/⚠ 字形与文字标签，颜色只是辅助通道。
+        /// </summary>
+        public static Palette BuildContrast()
+        {
+            var p = new Palette();
+            p.Bg = SystemColors.Window;
+            p.Card = SystemColors.Window;
+            p.Sidebar = SystemColors.Window;
+            p.Border = SystemColors.WindowText;
+            p.BorderStrong = SystemColors.WindowText;
+            p.Text = SystemColors.WindowText;
+            p.SubText = SystemColors.WindowText;
+            p.Muted = SystemColors.GrayText;
+            p.Accent = SystemColors.Highlight;
+            p.AccentHover = SystemColors.Highlight;
+            p.AccentPress = SystemColors.Highlight;
+            p.AccentSoft = SystemColors.Window;
+            p.Success = SystemColors.WindowText;
+            p.SuccessSoft = SystemColors.Window;
+            p.Warn = SystemColors.HotTrack;
+            p.WarnSoft = SystemColors.Window;
+            p.Danger = SystemColors.Highlight;
+            p.DangerSoft = SystemColors.Window;
+            p.HoverSoft = SystemColors.Window;
+            p.CodeBg = SystemColors.Window;
+            return p;
+        }
+
+        public static bool IsContrast { get { return ThemeName == "contrast"; } }
+
         static Palette _p = Light;
         public static string ThemeName = "light";
         public static event EventHandler ThemeChanged;
@@ -53,8 +86,16 @@ namespace DshToolbox.Gui
 
         public static void ApplyTheme(string name)
         {
-            ThemeName = string.Equals(name, "dark", StringComparison.OrdinalIgnoreCase) ? "dark" : "light";
-            _p = ThemeName == "dark" ? Dark : Light;
+            if (string.Equals(name, "contrast", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "high-contrast", StringComparison.OrdinalIgnoreCase))
+            {
+                ThemeName = "contrast";
+                _p = BuildContrast();          // 每次重建：跟随用户当前的高对比度方案
+            }
+            else
+            {
+                ThemeName = string.Equals(name, "dark", StringComparison.OrdinalIgnoreCase) ? "dark" : "light";
+                _p = ThemeName == "dark" ? Dark : Light;
+            }
             var h = ThemeChanged;
             if (h != null) h(null, EventArgs.Empty);
         }

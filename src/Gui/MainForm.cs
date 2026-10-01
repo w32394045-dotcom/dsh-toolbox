@@ -299,7 +299,7 @@ namespace DshToolbox.Gui
             if (r.IsEmpty) return;
             if (hover || down)
             {
-                Color bg = kind == 3 ? Color.FromArgb(0xE8, 0x11, 0x23) : (down ? Color.FromArgb(0xE4, 0xE8, 0xEE) : Color.FromArgb(0xEF, 0xF2, 0xF6));
+                Color bg = kind == 3 ? Ui.Danger : (down ? Ui.BorderStrong : Ui.HoverSoft);   // 走主题色：高对比度下才会跟随系统
                 Ui.FillRound(g, r, 7, bg);
             }
             Color fg = (kind == 3 && hover) ? Color.White : Ui.SubText;
@@ -464,8 +464,10 @@ namespace DshToolbox.Gui
             _title.CloseClick += (s, e) => Close();
             _title.ThemeClick += (s, e) => ToggleTheme();
             _title.Subtitle = "v" + ToolInfo.Version + " · GUI + CLI";
-            Ui.ApplyTheme(Settings.EffectiveTheme());
+            Ui.ApplyTheme(ResolveTheme());
             Ui.ThemeChanged += (s, e) => ApplyThemeToUi();
+            // 无障碍：用户改系统高对比度/主题时立刻跟随（ApplyTheme 内部会触发 ThemeChanged）
+            try { Microsoft.Win32.SystemEvents.UserPreferenceChanged += (s, e) => { try { if (IsHandleCreated && !IsDisposed) BeginInvoke(new Action(delegate { Ui.ApplyTheme(ResolveTheme()); })); } catch { } }; } catch { }
             Controls.Add(_title);
 
             _sidebar.Version = ToolInfo.Version;
@@ -1112,8 +1114,8 @@ namespace DshToolbox.Gui
                 DetectUrls = false,
                 ScrollBars = RichTextBoxScrollBars.Both,
                 Font = Ui.Mono(9.5f),
-                BackColor = Color.FromArgb(0x12, 0x14, 0x1A),
-                ForeColor = Color.FromArgb(0xD8, 0xDE, 0xE9)
+                BackColor = Ui.IsContrast ? SystemColors.Window : Color.FromArgb(0x12, 0x14, 0x1A),
+                ForeColor = Ui.IsContrast ? SystemColors.WindowText : Color.FromArgb(0xD8, 0xDE, 0xE9)
             };
             _termBox = box;
             _termConsoleCard.Row(box, 360);
@@ -1124,8 +1126,8 @@ namespace DshToolbox.Gui
             {
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = Ui.Mono(10f),
-                BackColor = Color.FromArgb(0x1B, 0x1E, 0x24),
-                ForeColor = Color.FromArgb(0xE6, 0xE8, 0xEB)
+                BackColor = Ui.IsContrast ? SystemColors.Window : Color.FromArgb(0x1B, 0x1E, 0x24),
+                ForeColor = Ui.IsContrast ? SystemColors.WindowText : Color.FromArgb(0xE6, 0xE8, 0xEB)
             };
             input.KeyDown += (s, e) =>
             {
@@ -1248,6 +1250,7 @@ namespace DshToolbox.Gui
 
         static Color TerminalColor(TermKind k)
         {
+            if (Ui.IsContrast) return k == TermKind.Dim ? SystemColors.GrayText : SystemColors.WindowText;   // 高对比度交给系统色
             switch (k)
             {
                 case TermKind.Input: return Color.FromArgb(0x7A, 0xC7, 0xFF);
@@ -1332,7 +1335,8 @@ namespace DshToolbox.Gui
             _setThemeLine = c3.Row(Lv(L.T("主题","Theme"), ThemeSummary()), 24);
             c3.Buttons(34,
                 Btn(L.T("切换主题","Toggle theme"), 118, ToggleTheme, FlatButton.Kind.Primary),
-                Btn(L.T("主题跟随系统","Theme: follow system"), 156, () => SetTheme("auto")));
+                Btn(L.T("主题跟随系统","Theme: follow system"), 156, () => SetTheme("auto")),
+                Btn(L.T("高对比度","High contrast"), 120, () => SetTheme("contrast")));
             c3.Buttons(34,
                 Btn("中文", 76, () => SetLanguage("zh-CN")),
                 Btn("English", 88, () => SetLanguage("en-US")),
@@ -1355,11 +1359,18 @@ namespace DshToolbox.Gui
         }
 
         // ------------------------------------------------------------ 主题
+        /// <summary>主题解析：系统开了高对比度就优先用它（无障碍优先于个人偏好）。</summary>
+        static string ResolveTheme()
+        {
+            try { if (SystemInformation.HighContrast) return "contrast"; } catch { }
+            return Settings.EffectiveTheme();
+        }
+
         void ToggleTheme()
         {
             Settings.Theme = Ui.IsDark ? "light" : "dark";
             Settings.Save();
-            Ui.ApplyTheme(Settings.EffectiveTheme());
+            Ui.ApplyTheme(ResolveTheme());
             Log(L.T("主题已切换为 " + Settings.Theme, "Theme switched to " + Settings.Theme), Ui.Accent);
         }
 
@@ -1443,7 +1454,7 @@ namespace DshToolbox.Gui
             if (string.Equals(Settings.Theme, norm, StringComparison.OrdinalIgnoreCase)) return;
             Settings.Theme = norm;
             Settings.Save();
-            Ui.ApplyTheme(Settings.EffectiveTheme());
+            Ui.ApplyTheme(ResolveTheme());
             if (_setThemeLine != null) { _setThemeLine.Value = ThemeSummary(); _pages[5].Relayout(); }
             Log(L.T("主题：", "Theme: ") + (Settings.ThemeIsAuto
                     ? L.T("跟随系统（当前 ", "follows system (") + Settings.SystemTheme() + ")"
