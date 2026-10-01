@@ -246,6 +246,16 @@ if ($SkipDestructive -or -not $available.ContainsKey('proc.kill')) {
             Record '破坏性操作未确认' 'PASS' ("exit=2 且 PID {0} 未被杀" -f $victim.Id)
         } else {
             Record '破坏性操作未确认' 'FAIL' ("exit={0} alive={1}（期望 exit=2 且存活）" -f $ng.Exit, $alive2)
+        }        # 正向对照：同一目标加 --yes 必须**真的**被杀掉。
+        # 没有这一步，"零副作用"就是自证的——一个什么都不做的程序当然"没有副作用"。
+        $yes = Invoke-Tb @('proc.kill', '--id', "$($victim.Id)", '--yes', '--json')
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $deadline) { $victim.Refresh(); if ($victim.HasExited) { break }; Start-Sleep -Milliseconds 300 }
+        $victim.Refresh()
+        if ($yes.Exit -eq 0 -and $victim.HasExited) {
+            Record '破坏性操作正向对照' 'PASS' ("--yes 后 PID {0} 确实被结束（证明闸门与执行都是真的）" -f $victim.Id)
+        } else {
+            Record '破坏性操作正向对照' 'FAIL' ("--yes exit={0} exited={1}（闸门可能是摆设）" -f $yes.Exit, $victim.HasExited)
         }
     } finally {
         try { if (-not $victim.HasExited) { Stop-Process -Id $victim.Id -Force } } catch { }
@@ -285,6 +295,82 @@ if ($SkipServe -or -not $available.ContainsKey('serve')) {
         Record 'serve 通道' 'FAIL' ("exited={0} frames={1} valid={2} init={3} unknown={4} bye={5}" -f $exited, $frames.Count, $okFrames, $hasInit, $hasUnknown, $hasBye)
     }
     Remove-Item $inF, $outF, $errF -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------- 5.5 实质断言（形状之外：结果必须是对的）
+# 背景：那 25 个"逐命令检查"只验证 退出码 + stdout 单行 + 信封三字段，
+# 一个只回合法信封的桩子能骗过它们（实测 26/36）。这一段专门验"内容对不对"。
+Write-Host "`n--- 5.5) 实质断言（结果必须正确，不只是形状合法） ---" -ForegroundColor Cyan
+
+if ($available.ContainsKey('hash.file')) {
+    $hfTarget = Join-Path $root 'src\Program.cs'
+    $hf = Invoke-Tb @('hash.file', '--path', $hfTarget, '--algo', 'sha256', '--json')
+    $hfExpect = (Get-FileHash -LiteralPath $hfTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hfJson = ($hf.Obj.data | ConvertTo-Json -Compress -Depth 8).ToLowerInvariant()
+    if ($hf.Exit -eq 0 -and $hfJson.Contains($hfExpect)) {
+        Record 'substantive: hash.file' 'PASS' ("sha256 与独立计算一致（{0}…）" -f $hfExpect.Substring(0, 12))
+    } else {
+        Record 'substantive: hash.file' 'FAIL' ("期望 {0}…，输出里找不到" -f $hfExpect.Substring(0, 12))
+    }
+}
+if ($available.ContainsKey('scan.find')) {
+    $sf = Invoke-Tb @('scan.find', '--path', (Join-Path $root 'src'), '--ext', '.cs', '--json')
+    $sfN = 0; [void][int]::TryParse("$($sf.Obj.data.count)", [ref]$sfN)
+    $sfJson = $sf.Obj.data | ConvertTo-Json -Compress -Depth 8
+    $sfHas = $sfJson -match 'Program\.cs'
+    if ($sf.Exit -eq 0 -and $sfN -ge 20 -and $sfHas) {
+        Record 'substantive: scan.find' 'PASS' ("找到 {0} 个 .cs 且包含 Program.cs" -f $sfN)
+    } else {
+        Record 'substantive: scan.find' 'FAIL' ("exit={0} count={1} 含Program.cs={2}（期望 >=20 且为真）" -f $sf.Exit, $sfN, $sfHas)
+    }
+}
+if ($available.ContainsKey('host.status')) {
+    $hs = Invoke-Tb @('host.status', '--json')
+    $hsPort = 0; [void][int]::TryParse("$($hs.Obj.data.webPort)", [ref]$hsPort)
+    $hsHome = "$($hs.Obj.data.dshHome)"
+    if ($hs.Exit -eq 0 -and $hsPort -gt 0 -and $hsHome.Length -gt 3) {
+        Record 'substantive: host.status' 'PASS' ("webPort={0} 且 dshHome 非空" -f $hsPort)
+    } else {
+        Record 'substantive: host.status' 'FAIL' ("exit={0} webPort={1} dshHome='{2}'" -f $hs.Exit, $hsPort, $hsHome)
+    }
+}
+if ($available.ContainsKey('config.get')) {
+    $cg = Invoke-Tb @('config.get', '--json')
+    $cgLangs = @($cg.Obj.data.languages)
+    $cgEff = "$($cg.Obj.data.effectiveLang)"
+    if ($cg.Exit -eq 0 -and $cgLangs.Count -ge 2 -and $cgEff -match '^[a-z]{2}-[A-Z]{2}$') {
+        Record 'substantive: config.get' 'PASS' ("生效语言 {0}，可选 {1} 个" -f $cgEff, $cgLangs.Count)
+    } else {
+        Record 'substantive: config.get' 'FAIL' ("exit={0} languages={1} effectiveLang='{2}'" -f $cg.Exit, $cgLangs.Count, $cgEff)
+    }
+}
+if ($available.ContainsKey('compat.check')) {
+    $cc = Invoke-Tb @('compat.check', '--fast', '--json')
+    $ccN = 0; [void][int]::TryParse("$($cc.Obj.data.count)", [ref]$ccN)
+    $ccBlock = $null -ne $cc.Obj.data.blockCount
+    if ($cc.Exit -eq 0 -and $ccN -ge 10 -and $ccBlock) {
+        Record 'substantive: compat.check' 'PASS' ("{0} 项探测 + blockCount 字段" -f $ccN)
+    } else {
+        Record 'substantive: compat.check' 'FAIL' ("exit={0} count={1} blockCount存在={2}" -f $cc.Exit, $ccN, $ccBlock)
+    }
+}
+if ($available.ContainsKey('proc.list')) {
+    $pl = Invoke-Tb @('proc.list', '--top', '250', '--json')
+    $plJson = $pl.Obj.data | ConvertTo-Json -Compress -Depth 8
+    if ($pl.Exit -eq 0 -and $plJson.Contains("$PID")) {
+        Record 'substantive: proc.list' 'PASS' ("进程表包含当前 PID {0}（确实在枚举）" -f $PID)
+    } else {
+        Record 'substantive: proc.list' 'FAIL' ("未包含当前 PID {0}（可能返回空壳）" -f $PID)
+    }
+}
+if ($available.ContainsKey('disk.space')) {
+    $ds = Invoke-Tb @('disk.space', '--json')
+    $dsJson = $ds.Obj.data | ConvertTo-Json -Compress -Depth 8
+    if ($ds.Exit -eq 0 -and $dsJson -match '"(total|totalBytes|size|bytes)"\s*:\s*[1-9]') {
+        Record 'substantive: disk.space' 'PASS' '容量字段为正数'
+    } else {
+        Record 'substantive: disk.space' 'FAIL' '容量字段缺失或为 0'
+    }
 }
 
 Stop-ProbeListener
