@@ -120,6 +120,30 @@ if ($r.ok) { $r.data.items | Select-Object -First 5 } else { $r.error }
 * **需要管理员的命令**在非管理员下返回 `E_ELEVATION_REQUIRED`（exit 4）；agent 应改用 `elevate.run`（会弹 UAC，需要人在场）。
 * **语言**：所有命令都支持 `--lang zh-CN|en-US`；GUI 与 CLI 共享 `settings.json`。
 * **进度**：`install.desktop` 等长任务在 `--jsonl` 模式下会输出 `{"type":"item",...,"percent":45,"done":"128 MB","total":"276 MB"}` 进度帧。
+## 4.6 依赖自举与"不会挂住"的执行（v0.3 新增）
+
+```powershell
+& $exe install.prereq --json               # 12 项前置探测：Node/npm/git/商店-winget/网络/磁盘/权限 + 可执行计划
+& $exe install.cli --dry-run --json        # 只给计划（不受提权闸门限制）
+& $exe install.cli --yes                   # 全自动：探测 → 缺 Node 自动装（官方 zip）→ npm 装 dsh → PATH → 验证
+& $exe install.node --yes                  # 只装 Node（官方 zip + SHASUMS256 校验）
+& $exe install.node --machine --yes        # 全机安装（%ProgramFiles%，系统 PATH）
+& $exe install.cli --user-level --prefix D:\x\npm --no-path --yes   # 演练/隔离安装
+& $exe run --non-interactive --tool npm --retry-args "--yes" -- npm install -g <pkg>
+```
+
+**安装类命令默认要求管理员（sudo）**：非管理员下返回 `E_ELEVATION_REQUIRED`（exit 4），
+agent 应改用 `elevate.run -- <命令>`（会弹 UAC，需要人在场）；`--user-level` 显式降级为当前用户安装。
+`install.prereq` 与所有 `--dry-run` **不受闸门限制**，可以先看计划再决定。
+
+**"疑似在等输入"是显式失败，不会挂住**：`run --non-interactive` 与安装链路都经过 `Proc`：
+关掉子进程 stdin、注入免交互环境变量、扫描提示特征、命中后自动换参数重试；
+结果里看 `promptSuspected` / `promptHint` / `interactiveTrace`。
+包装类命令失败时工具返回 exit 6，子命令退出码在 `data.exitCode`（契约 §4.2）。
+
+**不假设机器上有商店/git/npm**：Node 走官方 zip（无 MSI/EXE，无界面无协议页），
+npm 随 Node 一起提供；`install.prereq` 会明确告诉你不需要它们。
+
 ## 5. 安全约定（agent 必须遵守）
 
 1. **破坏性操作**（删除/移动/覆盖/杀进程/写注册表/改 ACL）默认拒绝，退出码 2；

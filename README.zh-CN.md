@@ -1,4 +1,4 @@
-# dsh-toolbox —— DSH 工具箱
+﻿# dsh-toolbox —— DSH 工具箱
 
 [English](README.md) | **简体中文**
 
@@ -44,6 +44,28 @@
 * **脱敏模式**（`DSH_TOOLBOX_REDACT=1`）：界面隐藏用户名与主目录路径，截图和日志可以放心贴到 issue 里，
   CLI 契约完全不受影响
 
+## 依赖与安装 —— 全自动
+
+`install.cli` 不假设机器上有什么。它**先探测、缺什么就自动装、再用 npm 把 CLI 装上**，全程 CLI、非交互：
+
+```powershell
+dsh-toolbox install.prereq --json          # 12 项前置探测 + 可直接执行的安装计划
+dsh-toolbox install.cli --dry-run --json   # 只展示计划，不动任何东西
+dsh-toolbox install.cli --yes              # 探测 → 缺 Node 自动装 → npm 装 dsh → PATH → 验证
+```
+
+* **不需要微软商店、不需要 winget、不需要 git。** Node 用**官方 zip**装到用户目录 —— 没有 MSI/EXE 安装器，
+  所以没有界面、没有协议页、这一步不需要管理员。
+* **完整性优先**：zip 用官方 `SHASUMS256.txt` 校验，装完再跑 `node --version` / `npm --version` 验证；
+  验不过就明确失败，绝不谎报成功。
+* **交互提示是"处理"而不是"祈祷"**（`src/Core/Proc.cs`）：子进程 stdin 立刻关闭（提示拿到 EOF，而不是把自动化挂住）、
+  按工具注入免交互环境变量（`npm_config_yes`/`CI=1`、`GIT_TERMINAL_PROMPT=0`/`GIT_ASKPASS=echo`/ssh `BatchMode=yes`、
+  winget 协议接受、MSI `/qn`）、扫描输出里的"在等输入"特征，命中后**自动改用非交互参数重试**，
+  两次尝试都记进 `interactiveTrace`。这套加固对任意命令都可用：
+  `dsh-toolbox run --non-interactive --tool npm --retry-args "--yes" -- npm install -g x`
+* **默认在管理员（sudo）模式下执行** —— 安装类操作被提权闸门挡住（`E_ELEVATION_REQUIRED`，exit 4）；
+  `--user-level` 装到当前用户，`--machine` 装成全机可用。探测与 `--dry-run` 不受闸门限制，任何时候都能先看计划。
+
 ## 下载
 
 从 [**Releases**](https://github.com/w32394045-dotcom/dsh-toolbox/releases/latest) 直接拿预编译的 exe ——
@@ -74,7 +96,10 @@ $exe = '.\dsh-toolbox.exe'
 
 ![浅色/深色 × 中文/英文](docs/screenshots/gui-theme-lang.png)
 
-* 6 个页面：概览 / 安装与升级 / 维护刷新 / 环境体检 / 任务与日志 / 关于
+* **7 个页面**：概览 / 安装与升级 / 维护刷新 / 环境体检 / 任务与日志 / 关于 / **终端**
+* **首页显示 Web 连接**（`http://127.0.0.1:<端口>/`），可一键*打开 Web 界面* / *复制地址*
+* **终端页**：按语义着色的控制台，命令走同一条 CLI 通道，带快捷命令与一键**启动 dsh CLI**；
+  按建议**仅在管理员模式下可用**（与 sudo 一致的边界）。
 * **与 CLI 共用同一套实现** —— 界面通过子进程调自己的 CLI，所以"界面里能用"就等于"通道里能用"
 * 无边框自绘 WinForms，DPI 自适应、圆角、`TextRenderer` 保证中文渲染正确
 * 单击活动日志弹出同风格独立窗口：
@@ -94,7 +119,7 @@ $exe = '.\dsh-toolbox.exe'
 | 签名与完整性 | `sign.verify` `sign.chain` `sign.hash` `sign.motw` |
 | 任务与日志 | `run` `job.start` `job.list` `job.status` `job.output` `job.kill` `log.append` `log.tail` `log.search` `log.runs` |
 | 宿主与维护 | `host.status` `maint.restart-host` `maint.kill-leftovers` `maint.clean-cache` `maint.pull-update` `maint.rebuild-self` |
-| 环境与安装 | `compat.check` `compat.fix` `install.check` `install.desktop` `install.cli` `install.verify` `elevate.run` |
+| 环境与安装 | `compat.check` `compat.fix` `install.prereq` `install.node` `install.check` `install.desktop` `install.cli` `install.verify` `elevate.run` |
 | 设置 | `config.get` `config.set` |
 | 通道 | `serve --stdio`（JSON-RPC 2.0） |
 

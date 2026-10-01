@@ -1,4 +1,4 @@
-# dsh-toolbox
+﻿# dsh-toolbox
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -47,6 +47,32 @@ elapsed milliseconds).
 * **Redaction mode** (`DSH_TOOLBOX_REDACT=1`): the UI hides your user name and home paths, so screenshots and
   logs are safe to attach to an issue — the CLI contract is untouched
 
+## Install & dependencies — fully automatic
+
+`install.cli` does not assume the machine has anything. It **checks first, installs what is missing, then
+installs the CLI via npm** — all through the CLI, non-interactively:
+
+```powershell
+dsh-toolbox install.prereq --json          # 12 pre-flight checks + an executable plan
+dsh-toolbox install.cli --dry-run --json   # show the whole plan without touching anything
+dsh-toolbox install.cli --yes              # check → install Node if missing → npm install dsh → PATH → verify
+```
+
+* **No Microsoft Store, no winget, no git required.** Node is installed from the **official zip** into the
+  user directory — no MSI/EXE installer, so no UI, no licence pages, no admin needed for that step.
+* **Integrity first**: the zip is checked against the official `SHASUMS256.txt`, and the result is verified by
+  running `node --version` / `npm --version`. If it cannot be verified, the install fails loudly.
+* **Interactive prompts are handled, not hoped for** (`Proc` in `src/Core/Proc.cs`): the child's stdin is closed
+  immediately (a prompt gets EOF instead of hanging your automation), tool-specific non-interactive
+  environment variables are injected (`npm_config_yes`/`CI=1`, `GIT_TERMINAL_PROMPT=0`/`GIT_ASKPASS=echo`/
+  ssh `BatchMode=yes`, winget agreements, MSI `/qn`), the output is scanned for "waiting for input" patterns,
+  and on a hit it **retries with non-interactive flags** — both attempts are recorded in `interactiveTrace`.
+  The same hardening is available for any command:
+  `dsh-toolbox run --non-interactive --tool npm --retry-args "--yes" -- npm install -g x`
+* **Runs in administrator (sudo) mode by default** — installs are gated behind elevation
+  (`E_ELEVATION_REQUIRED`, exit 4). Use `--user-level` for a per-user install, `--machine` for a system-wide
+  one. Checks and `--dry-run` are never gated, so you can always inspect the plan first.
+
 ## Download
 
 Grab the prebuilt exe from [**Releases**](https://github.com/w32394045-dotcom/dsh-toolbox/releases/latest) —
@@ -78,7 +104,10 @@ Complete command catalog, generated from `manifest --json`: [docs/COMMANDS.md](d
 
 ![light and dark, Chinese and English](docs/screenshots/gui-theme-lang.png)
 
-* Six pages: Overview / Install & upgrade / Maintenance / Environment check / Jobs & logs / About
+* Seven pages: Overview / Install & upgrade / Maintenance / Environment check / Jobs & logs / About / **Terminal**
+* **Web URL on the Overview page** (`http://127.0.0.1:<port>/`) with one-click *Open web UI* / *Copy URL*
+* **Terminal page** — a colour-coded console that runs commands through the same CLI channel, with quick-command
+  chips and one-click **Launch dsh CLI**. By design it is available in administrator mode only (same boundary as sudo).
 * Same implementation as the CLI — the GUI calls its own CLI as a child process, so **if it works in the
   window, it works over the channel**
 * Frameless custom-drawn WinForms, DPI-aware, rounded corners, `TextRenderer` for correct CJK rendering
@@ -99,7 +128,7 @@ Complete command catalog, generated from `manifest --json`: [docs/COMMANDS.md](d
 | Signature & integrity | `sign.verify` `sign.chain` `sign.hash` `sign.motw` |
 | Jobs & logs | `run` `job.start` `job.list` `job.status` `job.output` `job.kill` `log.append` `log.tail` `log.search` `log.runs` |
 | Host & maintenance | `host.status` `maint.restart-host` `maint.kill-leftovers` `maint.clean-cache` `maint.pull-update` `maint.rebuild-self` |
-| Environment & install | `compat.check` `compat.fix` `install.check` `install.desktop` `install.cli` `install.verify` `elevate.run` |
+| Environment & install | `compat.check` `compat.fix` `install.prereq` `install.node` `install.check` `install.desktop` `install.cli` `install.verify` `elevate.run` |
 | Settings | `config.get` `config.set` |
 | Channel | `serve --stdio` (JSON-RPC 2.0) |
 

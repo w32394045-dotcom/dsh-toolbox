@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -21,13 +21,14 @@ namespace DshToolbox.Commands
         public static void Register()
         {
             Registry.Add("run", "执行一条外部命令并完整记录（stdout/stderr/退出码/耗时/工作目录）",
-                "run [--cwd <dir>] [--env K=V]... [--shell] [--timeout <dur>] [--capture[=false]] [--max-bytes <n>] [--cmd <原始命令行>] -- <命令> [参数...]",
+                "run [--cwd <dir>] [--env K=V]... [--shell] [--timeout <dur>] [--capture[=false]] [--max-bytes <n>] [--non-interactive] [--tool <npm|git|msi|nsis|winget|powershell>] [--retry-args <args>] [--cmd <原始命令行>] -- <命令> [参数...]",
                 RunRun,
                 examples: new[]
                 {
                     "dsh-toolbox run --json -- cmd /c \"echo hi & exit 3\"",
                     "dsh-toolbox run --timeout 30s -- git status",
-                    "dsh-toolbox run --shell --cmd \"dir /b\" --json"
+                    "dsh-toolbox run --shell --cmd \"dir /b\" --json",
+                    "dsh-toolbox run --non-interactive --json -- cmd /c \"set /p x=Proceed? [y/N]\""
                 });
 
             Registry.Add("log.append", "往结构化日志追加一条（toolbox-YYYYMMDD.jsonl）",
@@ -60,6 +61,44 @@ namespace DshToolbox.Commands
             int timeoutMs = (int)ctx.GetSpan("--timeout", TimeSpan.Zero).TotalMilliseconds;
             bool capture = !ctx.Has("capture") || ctx.Flag("capture", true);
             long maxBytes = ctx.GetLong("--max-bytes", 8L * 1024 * 1024);
+
+            // ---- 非交互模式：给"会弹提示的安装器/工具"用。
+            // 关掉 stdin（提示立刻 EOF 而不是挂住）+ 按工具注入免交互环境变量 + 识别疑似提示，
+            // 命中后用 --retry-args 追加参数自动重试（两次尝试都记进 interactiveTrace）。
+            if (ctx.Flag("non-interactive"))
+            {
+                var psiH = JobStore.BuildPsi(target, cwd, env);
+                if (timeoutMs <= 0) timeoutMs = 10 * 60 * 1000;
+                string tool = ctx.Get("tool", "");
+                string retryArgs = ctx.Get("retry-args", "");
+                Dictionary<string, object> trace;
+                var hr = Proc.RunHardened(psiH.FileName, psiH.Arguments, timeoutMs,
+                                         string.IsNullOrEmpty(tool) ? null : tool, retryArgs, cwd, out trace);
+                bool okRun = hr.Exit == 0 && !hr.TimedOut && !hr.PromptSuspected;
+                var hitems = new List<object>
+                {
+                    Json.Obj("name", L.T("退出码", "exit code"), "value", hr.Exit),
+                    Json.Obj("name", L.T("耗时", "elapsed"), "value", hr.ElapsedMs + " ms"),
+                    Json.Obj("name", L.T("超时", "timed out"), "value", hr.TimedOut),
+                    Json.Obj("name", L.T("疑似在等输入", "waiting for input?"), "value", hr.PromptSuspected,
+                             "detail", hr.PromptHint),
+                    Json.Obj("name", L.T("stdout", "stdout"), "value", hr.Tail(2000))
+                };
+                ctx.Out.Result("run", Json.Obj(
+                    "hardened", true, "tool", tool, "cmd", target.Display, "cwd", cwd,
+                    "exitCode", hr.Exit, "elapsedMs", hr.ElapsedMs,
+                    "timedOut", hr.TimedOut, "promptSuspected", hr.PromptSuspected, "promptHint", hr.PromptHint,
+                    "interactiveTrace", trace,
+                    "stdout", hr.Tail(8000), "stderr", (hr.Stderr ?? "").Trim().Length > 0 ? hr.Stderr.Substring(0, Math.Min(4000, hr.Stderr.Length)) : "",
+                    "items", hitems, "count", hitems.Count, "columns", new[] { "name", "value" },
+                    "reason", okRun ? null : (hr.PromptSuspected
+                        ? L.T("疑似停在交互提示上（已尝试非交互重试）；用 --retry-args 指定该工具的静默参数",
+                              "appears stuck at an interactive prompt (non-interactive retry attempted); pass --retry-args with the tool\\u0027s silent flags")
+                        : (hr.TimedOut ? L.T("超时被杀", "timed out and was killed") : L.T("子进程非零退出", "child exited non-zero")))));
+                // 契约 §4.2：包装类命令失败 → 工具 exit 6，子命令退出码在 data.exitCode
+                return okRun ? ExitCodes.Ok : ExitCodes.Partial;
+            }
+
             string runId = JobStore.NewRunId();
             string outFile = Path.Combine(Paths.Runs, runId + ".out.json");
 

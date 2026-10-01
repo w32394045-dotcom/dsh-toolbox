@@ -397,15 +397,15 @@ namespace DshToolbox.Gui
     {
         const int TitleH = 46, SidebarW = 224;
 
-        readonly string[] _titles = { L.T(L.T("概览","Overview"),"Overview"), L.T(L.T("安装与升级","Install & upgrade"),"Install & upgrade"), L.T(L.T("维护刷新","Maintenance"),"Maintenance"), L.T(L.T("环境体检","Environment check"),"Environment check"), L.T(L.T("任务与日志","Jobs & logs"),"Jobs & logs"), L.T(L.T("关于","About"),"About") };
-        readonly string[] _glyphs = { "◈", "⬇", "⟳", "✚", "≡", "ⓘ" };
+        readonly string[] _titles = { L.T("概览","Overview"), L.T("安装与升级","Install & upgrade"), L.T("维护刷新","Maintenance"), L.T("环境体检","Environment check"), L.T("任务与日志","Jobs & logs"), L.T("关于","About"), L.T("终端","Terminal") };
+        readonly string[] _glyphs = { "◈", "⬇", "⟳", "✚", "≡", "ⓘ", "▶" };
 
         readonly TitleBar _title = new TitleBar();
         readonly SideBar _sidebar = new SideBar();
         readonly Panel _main = new Panel();
         readonly Panel _pageHost = new Panel();
-        readonly StackPage[] _pages = new StackPage[6];
-        readonly NavItem[] _navs = new NavItem[6];
+        readonly StackPage[] _pages = new StackPage[7];
+        readonly NavItem[] _navs = new NavItem[7];
         readonly List<Action> _refreshers = new List<Action>();
         readonly RichTextBox _log = new RichTextBox();
         readonly FlatProgress _progress = new FlatProgress();
@@ -438,7 +438,7 @@ namespace DshToolbox.Gui
             int startPage = 0;
             for (int i = 0; i + 1 < (args == null ? 0 : args.Length); i++)
                 if (args[i] == "--page" || args[i] == "--gui-page") int.TryParse(args[i + 1], out startPage);
-            if (startPage < 0 || startPage > 5) startPage = 0;
+            if (startPage < 0 || startPage > 6) startPage = 0;
             Select(startPage);
 
             Shown += (s, e) => { LayoutChrome(); AfterShown(); };
@@ -478,7 +478,7 @@ namespace DshToolbox.Gui
             _main.Controls.Add(_pageHost);
 
             var logCard = new BodyCard();
-            logCard.SetHeader(L.T(L.T("活动日志","Activity log"),"Activity log"), L.T(L.T("单击此处打开独立窗口（可选中、复制、导出）","Click to pop out a window (selectable, copyable, exportable)"),"Click to pop out a window (selectable, copyable, exportable)"));
+            logCard.SetHeader(L.T("活动日志","Activity log"), L.T("单击此处打开独立窗口（可选中、复制、导出）","Click to pop out a window (selectable, copyable, exportable)"));
             logCard.BackColor = Ui.Card;
             _main.Controls.Add(logCard);
             _logCard = logCard;
@@ -535,7 +535,7 @@ namespace DshToolbox.Gui
         void Select(int index)
         {
             _current = index;
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
             {
                 _navs[i].Selected = i == index;
                 _pages[i].Visible = i == index;
@@ -680,7 +680,7 @@ namespace DshToolbox.Gui
 
         void BuildPages()
         {
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
             {
                 var p = new StackPage();
                 _pages[i] = p;
@@ -695,7 +695,7 @@ namespace DshToolbox.Gui
                 nav.Bounds = new Rectangle(12, 34 + i * 42, SidebarW - 24, 40);
                 _navs[i] = nav;
             }
-            while (_refreshers.Count < 6) _refreshers.Add(null);
+            while (_refreshers.Count < 7) _refreshers.Add(null);
 
             BuildOverview(_pages[0]);
             BuildInstall(_pages[1]);
@@ -703,6 +703,7 @@ namespace DshToolbox.Gui
             BuildCompat(_pages[3]);
             BuildLogs(_pages[4]);
             BuildAbout(_pages[5]);
+            BuildTerminal(_pages[6]);
         }
 
         BodyCard Card(StackPage page, string title, string sub)
@@ -723,7 +724,9 @@ namespace DshToolbox.Gui
             return new BtnSpec { Text = text, Width = width, Click = click, Kind = kind, Admin = admin };
         }
 
-        LabelValue _ovVersion, _ovProcess, _ovPort, _ovCli, _ovHome, _ovCompatLine, _ovCompatLine2;
+        LabelValue _ovVersion, _ovProcess, _ovPort, _ovCli, _ovHome, _ovCompatLine, _ovCompatLine2, _ovWeb;
+        string _webUrl = "";
+        string _cliPath = "";
         StatusPill _ovPill;
         string _compatSummary = L.T("尚未体检","Not checked yet");
 
@@ -736,6 +739,11 @@ namespace DshToolbox.Gui
             _ovVersion = c1.Row(Lv(L.T("桌面端版本","Desktop version")), 24);
             _ovProcess = c1.Row(Lv(L.T("运行进程数","Processes")), 24);
             _ovPort = c1.Row(Lv(L.T("Web 端口","Web port")), 24);
+            _ovWeb = c1.Row(Lv(L.T("Web 地址","Web URL")), 24);
+            c1.Buttons(30,
+                Btn(L.T("打开 Web 界面","Open web UI"), 148, OpenWeb, FlatButton.Kind.Primary),
+                Btn(L.T("复制地址","Copy URL"), 108, CopyWeb),
+                Btn(L.T("启动 dsh CLI","Launch dsh CLI"), 148, () => OpenTerminal(CliCommand())));
             _ovCli = c1.Row(Lv("CLI"), 24);
             _ovHome = c1.Row(Lv(L.T("数据目录","Data folder")), 24);
             c1.Finish(4);
@@ -744,7 +752,7 @@ namespace DshToolbox.Gui
             c2.Buttons(34,
                 Btn(L.T("重启宿主","Restart host"), 108, () => AdminRun(L.T("重启 DSH 桌面端","Restart DSH desktop app"), "maint.restart-host --yes", "将结束全部 DSH 进程并重新启动（进行中的会话会中断）。")),
                 Btn(L.T("清理缓存","Clean cache"), 108, () => Run(L.T("清理 DSH 缓存（预览）","Clean DSH cache (preview)"), "maint.clean-cache --dry-run")),
-                Btn(L.T("结束残留进程","Kill leftovers"), 128, () => Run(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"), "maint.kill-leftovers --dry-run")),
+                Btn(L.T("结束残留进程","Kill leftovers"), 128, () => Run(L.T("结束残留进程（预览）","Kill leftovers (preview)"), "maint.kill-leftovers --dry-run")),
                 Btn(L.T("重新拉取更新","Re-pull update"), 128, () => AdminRun(L.T("重新拉取更新","Re-pull update"), "maint.pull-update --yes", "将清除已下载的待安装包并重启宿主，让它重新检查更新。")),
                 Btn(L.T("环境体检","Environment check"), 108, () => Select(3), FlatButton.Kind.Primary));
             c2.Finish(4);
@@ -794,6 +802,10 @@ namespace DshToolbox.Gui
                 _ovVersion.ValueColor = Bridge.B(desktop, "installed") ? Ui.Text : Ui.Warn;
                 _ovProcess.Value = Bridge.S(desktop, "processCount") + L.T(" 个","") + (Bridge.B(desktop, "running") ? L.T("（运行中）"," (running)") : "");
                 _ovPort.Value = Bridge.S(d, "webPort") + (Bridge.B(d, "webListening") ? L.T("  监听中 ✓","  listening ✓") : L.T("  未监听","  not listening"));
+                _webUrl = "http://127.0.0.1:" + Bridge.S(d, "webPort") + "/";
+                _ovWeb.Value = Bridge.B(d, "webListening") ? _webUrl : _webUrl + L.T("（当前未监听）", " (not listening right now)");
+                _ovWeb.ValueColor = Bridge.B(d, "webListening") ? Ui.Accent : Ui.Warn;
+                _cliPath = Bridge.B(cli, "found") ? Bridge.S(cli, "path") : "";
                 _ovCli.Value = Bridge.B(cli, "found") ? Bridge.S(cli, "path") : L.T("未检测到（安装页可安装）","Not detected (install it on the Install page)");
                 _ovHome.Value = Bridge.S(d, "dshHome");
                 _ovPill.Set(Bridge.B(desktop, "installed") ? L.T("已安装","Installed") : L.T("未安装","Not installed"),
@@ -827,6 +839,10 @@ namespace DshToolbox.Gui
             _ivSize = c2.Row(Lv(L.T("安装包","Package")), 24);
             _ivDate = c2.Row(Lv(L.T("发布日期","Released")), 24);
             _ivCli = c2.Row(Lv("CLI"), 24);
+            c2.Buttons(32,
+                Btn(L.T("启动 dsh CLI","Launch dsh CLI"), 148, () => OpenTerminal(CliCommand()), FlatButton.Kind.Primary),
+                Btn(L.T("打开终端页","Open terminal"), 132, () => OpenTerminal(null)),
+                Btn(L.T("检查依赖环境","Check environment"), 148, () => Run(L.T("安装前环境探测","Pre-flight environment check"), "install.prereq")));
             c2.Finish(4);
 
             var c3 = Card(page, L.T("执行安装 / 升级","Run install / upgrade"), L.T("自动完成：结束残留 → 校验大小/SHA512/签名 → 静默安装 → 校验版本 → 启动","Automatic: kill leftovers; verify size/SHA512/signature; silent install; verify version; launch"));
@@ -880,25 +896,25 @@ namespace DshToolbox.Gui
 
         void BuildMaint(StackPage page)
         {
-            var c1 = Card(page, L.T(L.T("快速刷新","Quick refresh"),"Quick refresh"), L.T(L.T("插件在重启后才会重新加载；升级失败、界面异常时先用这里","Plugins reload only after a restart; start here after a failed upgrade"),"Plugins reload only after a restart; start here after a failed upgrade"));
+            var c1 = Card(page, L.T("快速刷新","Quick refresh"), L.T("插件在重启后才会重新加载；升级失败、界面异常时先用这里","Plugins reload only after a restart; start here after a failed upgrade"));
             c1.Buttons(34,
-                Btn(L.T(L.T("重启宿主（刷新插件）","Restart host (reload plugins)"),"Restart host (reload plugins)"), 190, () => AdminRun(L.T("重启 DSH 桌面端","Restart DSH desktop app"), "maint.restart-host --yes", "将结束全部进程并重新启动。"), FlatButton.Kind.Primary, true),
-                Btn(L.T(L.T(L.T("重新拉取更新","Re-pull update"),"Re-pull update"), "Re-pull update"), 134, () => AdminRun(L.T(L.T(L.T("重新拉取更新","Re-pull update"),"Re-pull update"), "Re-pull update"), "maint.pull-update --yes", L.T("清除已下载内容并重启，让它重新检查更新。", "Clears downloaded packages and restarts so it re-checks.")), FlatButton.Kind.Ghost, true));
+                Btn(L.T("重启宿主（刷新插件）","Restart host (reload plugins)"), 190, () => AdminRun(L.T("重启 DSH 桌面端","Restart DSH desktop app"), "maint.restart-host --yes", "将结束全部进程并重新启动。"), FlatButton.Kind.Primary, true),
+                Btn(L.T(L.T("重新拉取更新","Re-pull update"), "Re-pull update"), 134, () => AdminRun(L.T(L.T("重新拉取更新","Re-pull update"), "Re-pull update"), "maint.pull-update --yes", L.T("清除已下载内容并重启，让它重新检查更新。", "Clears downloaded packages and restarts so it re-checks.")), FlatButton.Kind.Ghost, true));
             c1.Buttons(34,
-                Btn(L.T(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"),"Kill leftovers (preview)"), 168, () => Run(L.T(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"),"Kill leftovers (preview)"), "maint.kill-leftovers --dry-run")),
-                Btn(L.T(L.T("清理缓存（预览）","Clean cache (preview)"),"Clean cache (preview)"), 140, () => Run(L.T(L.T("清理缓存（预览）","Clean cache (preview)"),"Clean cache (preview)"), "maint.clean-cache --dry-run")),
-                Btn(L.T(L.T("清理缓存并执行","Clean cache (run)"),"Clean cache (run)"), 140, () => AdminRun(L.T("清理 DSH 缓存","Clean DSH cache"), "maint.clean-cache --yes", "会关闭应用并删除缓存目录。"), FlatButton.Kind.Ghost, true));
+                Btn(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"), 168, () => Run(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"), "maint.kill-leftovers --dry-run")),
+                Btn(L.T("清理缓存（预览）","Clean cache (preview)"), 140, () => Run(L.T("清理缓存（预览）","Clean cache (preview)"), "maint.clean-cache --dry-run")),
+                Btn(L.T("清理缓存并执行","Clean cache (run)"), 140, () => AdminRun(L.T("清理 DSH 缓存","Clean DSH cache"), "maint.clean-cache --yes", "会关闭应用并删除缓存目录。"), FlatButton.Kind.Ghost, true));
             c1.Buttons(34,
-                Btn(L.T(L.T("彻底清理（含会话存储）","Deep clean (incl. storage)"),"Deep clean (incl. storage)"), 200, () => AdminRun(L.T("彻底清理缓存","Deep cache clean"), "maint.clean-cache --yes --all", "除常规缓存外还会清理 Local/Session Storage（会退出登录态）。"), FlatButton.Kind.Danger, true),
-                Btn(L.T(L.T("重建工具箱自身","Rebuild toolbox"),"Rebuild toolbox"), 148, () => Run(L.T("重建 dsh-toolbox","Rebuilding dsh-toolbox"), "maint.rebuild-self")));
+                Btn(L.T("彻底清理（含会话存储）","Deep clean (incl. storage)"), 200, () => AdminRun(L.T("彻底清理缓存","Deep cache clean"), "maint.clean-cache --yes --all", "除常规缓存外还会清理 Local/Session Storage（会退出登录态）。"), FlatButton.Kind.Danger, true),
+                Btn(L.T("重建工具箱自身","Rebuild toolbox"), 148, () => Run(L.T("重建 dsh-toolbox","Rebuilding dsh-toolbox"), "maint.rebuild-self")));
             c1.Finish(4);
 
-            var c2 = Card(page, L.T(L.T("目录","Folders"),"Folders"), L.T(L.T("排障时常用的位置","Places you need while troubleshooting"),"Places you need while troubleshooting"));
+            var c2 = Card(page, L.T("目录","Folders"), L.T("排障时常用的位置","Places you need while troubleshooting"));
             c2.Buttons(34,
-                Btn(L.T(L.T("打开数据目录","Open data folder"),"Open data folder"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "@deepseek-ai", "dsh-desktop"))),
-                Btn(L.T(L.T("打开工具箱日志","Open toolbox logs"),"Open toolbox logs"), 140, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox", "logs"))),
-                Btn(L.T(L.T("打开更新缓存","Open update cache"),"Open update cache"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "@deepseek-aidsh-desktop-updater"))),
-                Btn(L.T(L.T("打开安装目录","Open install folder"),"Open install folder"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "DeepSeek Harness"))));
+                Btn(L.T("打开数据目录","Open data folder"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "@deepseek-ai", "dsh-desktop"))),
+                Btn(L.T("打开工具箱日志","Open toolbox logs"), 140, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-toolbox", "logs"))),
+                Btn(L.T("打开更新缓存","Open update cache"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "@deepseek-aidsh-desktop-updater"))),
+                Btn(L.T("打开安装目录","Open install folder"), 130, () => OpenPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "DeepSeek Harness"))));
             c2.Finish(4);
 
             _refreshers[2] = () => { };
@@ -908,29 +924,29 @@ namespace DshToolbox.Gui
         {
             try
             {
-                if (!Directory.Exists(path)) { Log(L.T(L.T("目录不存在：","Folder not found: "),"Folder not found: ") + path, Ui.Warn); return; }
+                if (!Directory.Exists(path)) { Log(L.T("目录不存在：","Folder not found: ") + path, Ui.Warn); return; }
                 Process.Start(new ProcessStartInfo("explorer.exe", "\"" + path + "\"") { UseShellExecute = true });
                 Log(L.T("已打开：","Opened: ") + path, Ui.Muted);
             }
-            catch (Exception ex) { Log(L.T(L.T("打开失败：","Open failed: "),"Open failed: ") + ex.Message, Ui.Danger); }
+            catch (Exception ex) { Log(L.T("打开失败：","Open failed: ") + ex.Message, Ui.Danger); }
         }
 
         BodyCard _compatCard;
 
         void BuildCompat(StackPage page)
         {
-            var c1 = Card(page, L.T(L.T("环境体检","Environment check"),"Environment check"), L.T(L.T("针对验签超时、指令集不支持、脚本受限等已知故障场景","Known failure modes: signing timeouts, unsupported instruction sets, restricted scripting"),"Known failure modes: signing timeouts, unsupported instruction sets, restricted scripting"));
+            var c1 = Card(page, L.T("环境体检","Environment check"), L.T("针对验签超时、指令集不支持、脚本受限等已知故障场景","Known failure modes: signing timeouts, unsupported instruction sets, restricted scripting"));
             c1.Buttons(34,
-                Btn(L.T(L.T("开始体检","Run checks"),"Run checks"), 108, () => Run(L.T(L.T("环境体检","Environment check"),"Environment check"), "compat.check", RenderCompat), FlatButton.Kind.Primary),
-                Btn(L.T(L.T("快速体检（跳过联网）","Quick check (offline)"),"Quick check (offline)"), 178, () => Run(L.T("环境体检（--fast）","Environment check (--fast)"), "compat.check --fast", RenderCompat)),
-                Btn(L.T(L.T("应用可自动修复项","Apply auto-fixes"),"Apply auto-fixes"), 178, ApplyFixes, FlatButton.Kind.Ghost, true));
+                Btn(L.T("开始体检","Run checks"), 108, () => Run(L.T("环境体检","Environment check"), "compat.check", RenderCompat), FlatButton.Kind.Primary),
+                Btn(L.T("快速体检（跳过联网）","Quick check (offline)"), 178, () => Run(L.T("环境体检（--fast）","Environment check (--fast)"), "compat.check --fast", RenderCompat)),
+                Btn(L.T("应用可自动修复项","Apply auto-fixes"), 178, ApplyFixes, FlatButton.Kind.Ghost, true));
             c1.Finish(4);
 
-            _compatCard = Card(page, L.T(L.T("检测结果","Check results"),"Check results"), L.T(L.T("每项都给出结论与原因；读不到就说读不到，绝不假装正常","Every item reports a verdict and a reason; unreadable is reported as unreadable"),"Every item reports a verdict and a reason; unreadable is reported as unreadable"));
+            _compatCard = Card(page, L.T("检测结果","Check results"), L.T("每项都给出结论与原因；读不到就说读不到，绝不假装正常","Every item reports a verdict and a reason; unreadable is reported as unreadable"));
             _compatCard.Row(Lv(L.T("提示","Info"), L.T("点上方「开始体检」开始检测","Use Run checks above")), 24);
             _compatCard.Finish(4);
 
-            _refreshers[3] = () => Run(L.T(L.T("环境体检","Environment check"),"Environment check"), "compat.check", RenderCompat);
+            _refreshers[3] = () => Run(L.T("环境体检","Environment check"), "compat.check", RenderCompat);
         }
 
         void RenderCompat(ToolResult r)
@@ -975,8 +991,8 @@ namespace DshToolbox.Gui
             {
                 case "longpaths": AdminRun(L.T("启用超长路径","Enable long paths"), "compat.fix --id longpaths --yes", "将写入 HKLM 的 LongPathsEnabled=1。"); break;
                 case "defender": AdminRun(L.T("添加 Defender 排除项","Add Defender exclusions"), "compat.fix --id defender --yes", "把应用目录与更新缓存排除出实时扫描，可显著加快验签与安装。"); break;
-                case "leftovers": Run(L.T(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"),"Kill leftovers (preview)"), "maint.kill-leftovers --dry-run"); break;
-                case "caches": Run(L.T(L.T("清理缓存（预览）","Clean cache (preview)"),"Clean cache (preview)"), "maint.clean-cache --dry-run"); break;
+                case "leftovers": Run(L.T(L.T("结束残留进程（预览）","Kill leftovers (preview)"),"Kill leftovers (preview)"), "maint.kill-leftovers --dry-run"); break;
+                case "caches": Run(L.T("清理缓存（预览）","Clean cache (preview)"), "maint.clean-cache --dry-run"); break;
                 default: Log(L.T("该项需手动处理：","Handle manually: ") + id, Ui.Warn); break;
             }
         }
@@ -1047,6 +1063,15 @@ namespace DshToolbox.Gui
 
         LabelValue _setLangLine, _setThemeLine;
 
+        // ---------------- 终端（仅管理员模式）
+        TerminalSession _term;
+        RichTextBox _termBox;
+        TextBox _termInput;
+        BodyCard _termLockCard, _termConsoleCard;
+        StatusPill _termPill;
+        LabelValue _termCwdLine;
+        StackPage _termPageRef;
+
         static string LangSummary()
         {
             return Settings.LangIsAuto
@@ -1059,6 +1084,215 @@ namespace DshToolbox.Gui
             return Settings.EffectiveTheme() + (Settings.ThemeIsAuto
                 ? L.T("（自动，跟随系统）", " (auto, follows system)")
                 : L.T("（手动指定）", " (explicit)"));
+        }
+
+        // ---------------- 终端页
+        void BuildTerminal(StackPage page)
+        {
+            _termPageRef = page;
+            var c1 = Card(page, L.T("终端", "Terminal"), L.T("在工具箱里直接跑命令，输出按语义着色", "Run commands inside the toolbox; output is colour-coded by meaning"));
+            _termPill = c1.HeaderSlot(new StatusPill(), 118, 22);
+            _termPill.Set(GuiHost.IsElevated() ? L.T("管理员模式", "Admin") : L.T("普通用户", "Standard"),
+                          GuiHost.IsElevated() ? StatusPill.Tone.Ok : StatusPill.Tone.Warn);
+            c1.Row(Lv(L.T("说明", "Note"), L.T("建议只在管理员模式下使用（与 sudo 一致的边界）", "Recommended only in admin mode (the same boundary as sudo)")), 24);
+            c1.Finish(4);
+
+            _termLockCard = Card(page, L.T("需要管理员模式", "Admin mode required"),
+                L.T("终端能以当前身份执行任意命令，因此按建议放在管理员模式后面。", "The terminal can run arbitrary commands as the current user, so it sits behind admin mode."));
+            _termLockCard.Row(Lv(L.T("当前身份", "Current identity"), GuiHost.IsElevated() ? L.T("管理员", "Administrator") : L.T("普通用户", "Standard user")), 24);
+            _termLockCard.Buttons(34, Btn(L.T("进入管理员模式", "Enter admin mode"), 172, RequestElevation, FlatButton.Kind.Primary));
+            _termLockCard.Finish(4);
+
+            _termConsoleCard = Card(page, L.T("控制台", "Console"), L.T("命令走 CLI 通道；回车执行", "Commands go through the CLI channel; press Enter to run"));
+            var box = new RichTextBox
+            {
+                BorderStyle = BorderStyle.None,
+                ReadOnly = true,
+                WordWrap = false,
+                DetectUrls = false,
+                ScrollBars = RichTextBoxScrollBars.Both,
+                Font = Ui.Mono(9.5f),
+                BackColor = Color.FromArgb(0x12, 0x14, 0x1A),
+                ForeColor = Color.FromArgb(0xD8, 0xDE, 0xE9)
+            };
+            _termBox = box;
+            _termConsoleCard.Row(box, 360);
+
+            _termCwdLine = _termConsoleCard.Row(Lv(L.T("会话", "Session"), L.T("未启动", "not started")), 22);
+
+            var input = new TextBox
+            {
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = Ui.Mono(10f),
+                BackColor = Color.FromArgb(0x1B, 0x1E, 0x24),
+                ForeColor = Color.FromArgb(0xE6, 0xE8, 0xEB)
+            };
+            input.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter && !e.Shift)
+                {
+                    e.SuppressKeyPress = true;
+                    var cmd = input.Text; input.Clear();
+                    SendTerminal(cmd);
+                }
+            };
+            _termInput = input;
+            _termConsoleCard.Row(input, 30);
+            _termConsoleCard.Buttons(32,
+                Btn(L.T("运行", "Run"), 84, () => { var c = _termInput.Text; _termInput.Clear(); SendTerminal(c); }, FlatButton.Kind.Primary),
+                Btn(L.T("重启会话", "Restart"), 116, () => EnsureTerminal(true)),
+                Btn(L.T("清空", "Clear"), 84, () => { if (_termBox != null) _termBox.Clear(); }),
+                Btn(L.T("导出", "Export"), 84, ExportTerminal),
+                Btn(L.T("复制全部", "Copy all"), 116, () => { try { Clipboard.SetText(_termBox.Text); Log(L.T("终端输出已复制", "Terminal output copied"), Ui.Success); } catch { } }));
+            _termConsoleCard.Buttons(32,
+                Btn("dsh --version", 140, () => OpenTerminal("dsh --version")),
+                Btn("dsh --help", 120, () => OpenTerminal("dsh --help")),
+                Btn("dsh-toolbox doctor", 168, () => OpenTerminal("dsh-toolbox doctor")),
+                Btn("dsh-toolbox install.prereq", 208, () => OpenTerminal("dsh-toolbox install.prereq --json")));
+            _termConsoleCard.Finish(4);
+
+            _refreshers[6] = () => ApplyTerminalGate();
+            ApplyTerminalGate();
+        }
+
+        void ApplyTerminalGate()
+        {
+            bool admin = GuiHost.IsElevated();
+            if (_termLockCard != null) _termLockCard.Visible = !admin;
+            if (_termConsoleCard != null) _termConsoleCard.Visible = admin;
+            if (_termPill != null)
+                _termPill.Set(admin ? L.T("管理员模式", "Admin") : L.T("普通用户", "Standard"),
+                              admin ? StatusPill.Tone.Ok : StatusPill.Tone.Warn);
+            if (_termPageRef != null) _termPageRef.Relayout();
+            if (admin) EnsureTerminal(false);
+        }
+
+        string CliCommand()
+        {
+            if (!string.IsNullOrEmpty(_cliPath) && File.Exists(_cliPath)) return "\"" + _cliPath + "\"";
+            try
+            {
+                string shim = Path.Combine(ProvisionShim(), "dsh.cmd");
+                if (File.Exists(shim)) return "\"" + shim + "\"";
+            }
+            catch { }
+            return "dsh";
+        }
+
+        static string ProvisionShim()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                "dsh-toolbox", "runtime", "npm-global");
+        }
+
+        void OpenTerminal(string command)
+        {
+            Select(6);
+            if (!GuiHost.IsElevated())
+            {
+                Log(L.T("终端按建议只在管理员模式下可用：请点下方「进入管理员模式」。", "The terminal is admin-mode only by design: click \"Enter admin mode\" below."), Ui.Warn);
+                return;
+            }
+            EnsureTerminal(false);
+            if (!string.IsNullOrEmpty(command)) SendTerminal(command);
+            if (_termInput != null) _termInput.Focus();
+        }
+
+        void EnsureTerminal(bool restart)
+        {
+            if (_term != null && restart) { _term.Restart(); UpdateTerminalStatus(); return; }
+            if (_term != null && _term.Running) return;
+            if (_term == null)
+            {
+                _term = new TerminalSession();
+                _term.Line += line => AppendTerminal(line);
+                _term.Exited += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateTerminalStatus)); } catch { } } };
+            }
+            _term.Start(Path.GetDirectoryName(Bridge.ExePath));
+            UpdateTerminalStatus();
+        }
+
+        void UpdateTerminalStatus()
+        {
+            if (_termCwdLine == null) return;
+            bool run = _term != null && _term.Running;
+            _termCwdLine.Value = run ? L.T("PowerShell 会话运行中", "PowerShell session running") : L.T("未启动", "not started");
+            _termCwdLine.ValueColor = run ? Ui.Success : Ui.Muted;
+        }
+
+        void SendTerminal(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return;
+            if (!GuiHost.IsElevated())
+            {
+                Log(L.T("终端需要管理员模式", "The terminal needs admin mode"), Ui.Warn);
+                return;
+            }
+            EnsureTerminal(false);
+            _term.Echo(command.Trim());
+            _term.Send(command.Trim());
+        }
+
+        void AppendTerminal(TermLine line)
+        {
+            if (_termBox == null || _termBox.IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(new Action(() => AppendTerminal(line))); return; }
+            if (_termBox.Lines.Length > 3000) _termBox.Clear();
+            _termBox.SelectionStart = _termBox.TextLength;
+            _termBox.SelectionLength = 0;
+            _termBox.SelectionColor = TerminalColor(line.Kind);
+            _termBox.AppendText(line.Text + Environment.NewLine);
+            _termBox.SelectionStart = _termBox.TextLength;
+            _termBox.ScrollToCaret();
+        }
+
+        static Color TerminalColor(TermKind k)
+        {
+            switch (k)
+            {
+                case TermKind.Input: return Color.FromArgb(0x7A, 0xC7, 0xFF);
+                case TermKind.Ok: return Color.FromArgb(0x6B, 0xD9, 0x8B);
+                case TermKind.Warn: return Color.FromArgb(0xE8, 0xC0, 0x6A);
+                case TermKind.Err: return Color.FromArgb(0xFF, 0x7B, 0x72);
+                case TermKind.Dim: return Color.FromArgb(0x7C, 0x84, 0x8F);
+                case TermKind.Info: return Color.FromArgb(0x9E, 0xC1, 0xFF);
+                default: return Color.FromArgb(0xD8, 0xDE, 0xE9);
+            }
+        }
+
+        void ExportTerminal()
+        {
+            try
+            {
+                using (var dlg = new SaveFileDialog())
+                {
+                    dlg.Title = L.T("导出终端输出", "Export terminal output");
+                    dlg.Filter = L.T("文本文件 (*.txt)|*.txt|所有文件 (*.*)|*.*", "Text files (*.txt)|*.txt|All files (*.*)|*.*");
+                    dlg.FileName = "dsh-toolbox-terminal-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt";
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                    File.WriteAllText(dlg.FileName, _termBox.Text, new UTF8Encoding(false));
+                    Log(L.T("已导出：", "Exported: ") + dlg.FileName, Ui.Success);
+                }
+            }
+            catch (Exception ex) { Log(L.T("导出失败：", "Export failed: ") + ex.Message, Ui.Danger); }
+        }
+
+        void OpenWeb()
+        {
+            if (string.IsNullOrEmpty(_webUrl)) { Log(L.T("还没读到 Web 地址，先刷新宿主状态", "No web URL yet; refresh host status first"), Ui.Warn); return; }
+            try
+            {
+                Process.Start(new ProcessStartInfo(_webUrl) { UseShellExecute = true });
+                Log(L.T("已用默认浏览器打开 ", "Opened in the default browser: ") + _webUrl, Ui.Success);
+            }
+            catch (Exception ex) { Log(L.T("打开失败：", "Open failed: ") + ex.Message, Ui.Danger); }
+        }
+
+        void CopyWeb()
+        {
+            if (string.IsNullOrEmpty(_webUrl)) return;
+            try { Clipboard.SetText(_webUrl); Log(L.T("已复制 Web 地址：", "Web URL copied: ") + _webUrl, Ui.Success); }
+            catch (Exception ex) { Log(L.T("复制失败：", "Copy failed: ") + ex.Message, Ui.Danger); }
         }
 
         void BuildAbout(StackPage page)
